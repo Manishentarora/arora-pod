@@ -1578,22 +1578,22 @@ function renderDriverUpload() {
       ${todayCount > 0 ? `<div style="margin-top:8px;font-size:12px;font-weight:600;color:var(--ok-text);background:var(--ok-soft);display:inline-block;padding:3px 12px;border-radius:20px">${todayCount} submitted today</div>` : ''}
     </div>
 
-    <!-- Hidden file input — triggered by button click -->
-    <input type="file" accept="image/*" capture="environment" id="driver-file-input"
-      onchange="handleDriverPhoto(event)"
-      style="position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0"/>
-
     <div style="margin:0.5rem 0.5rem 0">
-      <button
-        onclick="document.getElementById('driver-file-input').click()"
+      <label for="driver-file-input"
         style="display:flex;flex-direction:column;align-items:center;justify-content:center;
                background:var(--accent);border-radius:24px;cursor:pointer;
-               width:100%;min-height:calc(100vh - 280px);gap:1rem;
-               border:none;font-family:inherit;padding:2rem 1rem">
-        <span style="font-size:80px;line-height:1">📷</span>
-        <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.3px">Tap to take photo</span>
-        <span style="font-size:14px;color:rgba(255,255,255,0.8)">Point at the signed receiving copy</span>
-      </button>
+               width:100%;min-height:calc(100vh - 280px);gap:1rem;padding:2rem 1rem;
+               box-sizing:border-box;-webkit-tap-highlight-color:transparent">
+        <span style="font-size:80px;line-height:1;user-select:none">📷</span>
+        <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.3px;user-select:none">Tap to take photo</span>
+        <span style="font-size:14px;color:rgba(255,255,255,0.8);user-select:none">Point at the signed receiving copy</span>
+      </label>
+      <input type="file"
+        accept="image/*"
+        capture="environment"
+        id="driver-file-input"
+        onchange="handleDriverPhoto(event)"
+        style="width:0.1px;height:0.1px;opacity:0;overflow:hidden;position:absolute;z-index:-1"/>
     </div>
   `;
 }
