@@ -268,6 +268,10 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 <body>
 
 <div id="toast" class="toast"></div>
+<!-- Permanent file input for driver — lives in static DOM, never recreated -->
+<input type="file" accept="image/*" capture="environment" id="driver-file-input"
+  onchange="handleDriverPhoto(event)"
+  style="position:fixed;width:1px;height:1px;opacity:0;top:0;left:0;z-index:-999;pointer-events:none"/>
 
 <!-- ═══════════════════════════════════════════════════════════
      LOGIN SCREEN
@@ -1580,6 +1584,7 @@ function renderDriverUpload() {
 
     <div style="margin:0.5rem 0.5rem 0">
       <label for="driver-file-input"
+        onclick="document.getElementById('driver-file-input').click()"
         style="display:flex;flex-direction:column;align-items:center;justify-content:center;
                background:var(--accent);border-radius:24px;cursor:pointer;
                width:100%;min-height:calc(100vh - 280px);gap:1rem;padding:2rem 1rem;
@@ -1588,12 +1593,7 @@ function renderDriverUpload() {
         <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.3px;user-select:none">Tap to take photo</span>
         <span style="font-size:14px;color:rgba(255,255,255,0.8);user-select:none">Point at the signed receiving copy</span>
       </label>
-      <input type="file"
-        accept="image/*"
-        capture="environment"
-        id="driver-file-input"
-        onchange="handleDriverPhoto(event)"
-        style="width:0.1px;height:0.1px;opacity:0;overflow:hidden;position:absolute;z-index:-1"/>
+
     </div>
   `;
 }
