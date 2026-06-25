@@ -1578,13 +1578,22 @@ function renderDriverUpload() {
       ${todayCount > 0 ? `<div style="margin-top:8px;font-size:12px;font-weight:600;color:var(--ok-text);background:var(--ok-soft);display:inline-block;padding:3px 12px;border-radius:20px">${todayCount} submitted today</div>` : ''}
     </div>
 
+    <!-- Hidden file input — triggered by button click -->
+    <input type="file" accept="image/*" capture="environment" id="driver-file-input"
+      onchange="handleDriverPhoto(event)"
+      style="position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0"/>
+
     <div style="margin:0.5rem 0.5rem 0">
-      <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--accent);border-radius:24px;cursor:pointer;position:relative;overflow:hidden;min-height:calc(100vh - 260px);gap:1rem;text-decoration:none">
-        <input type="file" accept="image/*" capture="environment" id="driver-file-input" onchange="handleDriverPhoto(event)" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;font-size:0"/>
-        <span style="font-size:80px;line-height:1;pointer-events:none">📷</span>
-        <span style="font-size:22px;font-weight:800;color:#fff;pointer-events:none;letter-spacing:-0.3px">Tap to take photo</span>
-        <span style="font-size:14px;color:rgba(255,255,255,0.8);pointer-events:none">Point at the signed receiving copy</span>
-      </label>
+      <button
+        onclick="document.getElementById('driver-file-input').click()"
+        style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+               background:var(--accent);border-radius:24px;cursor:pointer;
+               width:100%;min-height:calc(100vh - 280px);gap:1rem;
+               border:none;font-family:inherit;padding:2rem 1rem">
+        <span style="font-size:80px;line-height:1">📷</span>
+        <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.3px">Tap to take photo</span>
+        <span style="font-size:14px;color:rgba(255,255,255,0.8)">Point at the signed receiving copy</span>
+      </button>
     </div>
   `;
 }
