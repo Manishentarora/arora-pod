@@ -1566,38 +1566,30 @@ function goBack() {
 // ═══════════════════════════════════════════════════════════
 function renderDriverUpload() {
   const c = document.getElementById('main-content');
-  // Count today's submissions by this driver
   const today = new Date().toISOString().slice(0,10);
-  const todayCount = S.pods.filter(p => p.driver === S.user.name && p.dispatchDate === today).length;
+  const todayCount = S.pods.filter(function(p){ return p.driver === S.user.name && p.dispatchDate === today; }).length;
+  const todayHtml = todayCount > 0
+    ? '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#065f46;background:#d1fae5;display:inline-block;padding:3px 12px;border-radius:20px">' + todayCount + ' submitted today</div>'
+    : '';
 
-  c.innerHTML = `
-    <div style="text-align:center;padding:1.25rem 0 0.75rem">
-      <div style="font-size:13px;color:var(--text3)">Logged in as</div>
-      <div style="font-size:17px;font-weight:700;color:var(--text);margin-top:2px">${escHtml(S.user.name)}</div>
-      <div style="font-size:12px;color:var(--text3);margin-top:2px">
-        ${escHtml(S.user.firm)}
-        &nbsp;·&nbsp;
-        <button onclick="showDriverSettings()" style="background:none;border:none;color:var(--info);font-size:12px;cursor:pointer;font-family:inherit;padding:0">Change details</button>
-      </div>
-      ${todayCount > 0 ? `<div style="margin-top:8px;font-size:12px;font-weight:600;color:var(--ok-text);background:var(--ok-soft);display:inline-block;padding:3px 12px;border-radius:20px">${todayCount} submitted today</div>` : ''}
-    </div>
-
-    <div style="margin:0.5rem 0.5rem 0">
-      <label for="driver-file-input"
-        onclick="document.getElementById('driver-file-input').click()"
-        style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-               background:var(--accent);border-radius:24px;cursor:pointer;
-               width:100%;min-height:calc(100vh - 280px);gap:1rem;padding:2rem 1rem;
-               box-sizing:border-box;-webkit-tap-highlight-color:transparent">
-        <span style="font-size:80px;line-height:1;user-select:none">📷</span>
-        <span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.3px;user-select:none">Tap to take photo</span>
-        <span style="font-size:14px;color:rgba(255,255,255,0.8);user-select:none">Point at the signed receiving copy</span>
-      </label>
-
-    </div>
-  `;
+  c.innerHTML =
+    '<div style="text-align:center;padding:1.25rem 0 0.75rem">' +
+      '<div style="font-size:13px;color:#718096">Logged in as</div>' +
+      '<div style="font-size:17px;font-weight:700;color:#1a202c;margin-top:2px">' + escHtml(S.user.name) + '</div>' +
+      '<div style="font-size:12px;color:#718096;margin-top:2px">' +
+        escHtml(S.user.firm) + ' &nbsp;&middot;&nbsp; ' +
+        '<button onclick="showDriverSettings()" style="background:none;border:none;color:#2563eb;font-size:12px;cursor:pointer;font-family:inherit;padding:0">Change details</button>' +
+      '</div>' +
+      todayHtml +
+    '</div>' +
+    '<div style="margin:0.5rem">' +
+      '<label for="driver-file-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:#e94560;border-radius:24px;cursor:pointer;width:100%;min-height:70vh;gap:1rem;padding:2rem 1rem;box-sizing:border-box">' +
+        '<span style="font-size:80px;line-height:1">&#128247;</span>' +
+        '<span style="font-size:22px;font-weight:800;color:#fff">Tap to take photo</span>' +
+        '<span style="font-size:14px;color:rgba(255,255,255,0.8)">Point at the signed receiving copy</span>' +
+      '</label>' +
+    '</div>';
 }
-
 // Driver taps — photo selected — submit INSTANTLY — no waiting
 function handleDriverPhoto(event) {
   const file = event.target.files[0];
