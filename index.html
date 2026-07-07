@@ -350,7 +350,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 </div>
 
 <!-- ═══ ROLE CHOOSER (shown on first visit to choose driver vs staff) ═══ -->
-<div id="role-chooser-screen" class="login-screen">
+<div id="role-chooser-screen" class="login-screen" style="display:none">
   <div class="login-logo">Arora <span>POD</span></div>
   <div class="login-sub">Proof of Delivery System</div>
   <div class="login-card">
@@ -2937,7 +2937,12 @@ function dismissInstall() {
 
 // ══════════════════════════════════════════════════════════
 // Pods are loaded inside enterApp() — nothing to pre-load here.
-appStartup(); // decide which screen to show based on saved profile
+// Run after DOM is fully loaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', appStartup);
+} else {
+  appStartup();
+}
 </script>
 </body>
 </html>
