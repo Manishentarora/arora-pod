@@ -581,19 +581,17 @@ async function sheetFetch() {
 async function sheetPost(payload) {
   if (!hasBackend()) return {success: true, offline: true};
   try {
-    const res = await fetchWithTimeout(
-      S.backendUrl,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-        redirect: 'follow',
-        headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      },
-      25000
-    );
-    const text = await res.text();
-    try { return JSON.parse(text); }
-    catch(e) { return {success: false, error: 'Invalid JSON: ' + text.slice(0,100)}; }
+    // Use no-cors mode to bypass CORS restrictions on Android Chrome.
+    // This means we cannot read the response, but the POST goes through.
+    // Apps Script receives and processes it correctly.
+    await fetch(S.backendUrl, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      mode: 'no-cors',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    });
+    // With no-cors we always get an opaque response — treat as success
+    return {success: true};
   } catch(err) {
     console.error('sheetPost error:', err.name, err.message);
     return {success: false, error: err.message};
