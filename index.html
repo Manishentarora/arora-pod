@@ -521,6 +521,12 @@ const S = {
   syncStatus: 'idle', // idle | syncing | error | ok
 };
 
+// Escape HTML special characters
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+
 // ═══════════════════════════════════════════════════════════
 // GOOGLE SHEETS API LAYER
 // All calls go through here — if no backend URL is set,
