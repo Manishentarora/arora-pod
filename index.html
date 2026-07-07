@@ -298,7 +298,13 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
         <option value="Firm 2">Firm 2 — Arora Industrial Traders Pvt Ltd</option>
       </select>
     </div>
-    <button class="btn btn-primary" onclick="completeDriverSetup()" style="margin-top:6px">Save &amp; Start →</button>
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.15)">
+      <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:6px">Google Sheet URL (get from your manager)</div>
+      <input type="text" id="setup-backend-url" placeholder="Paste Apps Script URL here"
+        style="width:100%;padding:10px 12px;border:1.5px solid rgba(255,255,255,0.3);border-radius:8px;font-size:12px;color:#1a202c;background:#fff;font-family:inherit;box-sizing:border-box"/>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:4px">Without this, photos will not reach the office</div>
+    </div>
+    <button class="btn btn-primary" onclick="completeDriverSetup()" style="margin-top:14px">Save &amp; Start</button>
   </div>
 </div>
 
@@ -498,7 +504,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 // CONFIGURATION — paste your Apps Script Web App URL here
 // after deploying (see setup guide)
 // ═══════════════════════════════════════════════════════════
-const BACKEND_URL = localStorage.getItem('arora_backend_url') || '';
+const BACKEND_URL = localStorage.getItem('arora_backend_url') || 'https://script.google.com/macros/s/AKfycbx0P9uLG90lED7_2CjT8gNeu9wulp9oO3gJ9hZswacUSnCNn5yPBuo4B9GNDX01zOI73Q/exec';
 
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -1196,6 +1202,13 @@ function completeDriverSetup() {
   if (!mobile || mobile.length < 10) { showToast('Please enter a valid 10-digit mobile number'); return; }
   if (!firm)   { showToast('Please select your firm'); return; }
 
+  // Save backend URL if provided
+  const backendUrl = (document.getElementById('setup-backend-url') ?
+    document.getElementById('setup-backend-url').value : '').trim();
+  if (backendUrl && backendUrl.startsWith('https://')) {
+    S.backendUrl = backendUrl;
+    localStorage.setItem('arora_backend_url', backendUrl);
+  }
   // Save permanently to this device
   saveDriverProfile({name, mobile, firm});
   S.user = {name, mobile, firm, role: 'driver', defaultMode: 'Own Fleet'};
@@ -1246,6 +1259,12 @@ function showDriverSettings() {
     </div>
     <button class="btn btn-primary" onclick="saveDriverSettings()">Save changes</button>
     <button class="btn btn-outline" style="margin-top:0.5rem" onclick="showScreen('driver-upload')">Cancel</button>
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)" class="field">
+      <label class="label" for="edit-backend-url">Google Sheet URL</label>
+      <input type="text" id="edit-backend-url" value="${escHtml(S.backendUrl||'')}"
+        placeholder="Apps Script Web App URL" style="font-size:12px"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:3px">Required for photos to reach the office</div>
+    </div>
     <div style="margin-top:1.5rem;text-align:center">
       <button onclick="clearDriverProfile()" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;font-family:inherit">Reset this device (logout)</button>
     </div>
@@ -1263,6 +1282,15 @@ function saveDriverSettings() {
   S.user.mobile = mobile;
   S.user.firm   = firm;
   document.getElementById('topbar-role').textContent = name;
+  // Save backend URL if provided
+  const urlEl = document.getElementById('edit-backend-url');
+  if (urlEl) {
+    const newUrl = urlEl.value.trim();
+    if (newUrl && newUrl.startsWith('https://')) {
+      S.backendUrl = newUrl;
+      localStorage.setItem('arora_backend_url', newUrl);
+    }
+  }
   showToast('Details saved');
   showScreen('driver-upload');
 }
