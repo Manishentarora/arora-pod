@@ -106,7 +106,16 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 .upload-zone small{font-size:12px;color:var(--text3)}
 
 /* ─── PREVIEW IMAGE ─── */
-.photo-preview{width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;max-height:220px;object-fit:cover}
+.photo-preview{width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;max-height:220px;object-fit:contain;background:var(--surface3);cursor:zoom-in}
+
+/* ─── LIGHTBOX (pinch-zoom / pan full photo viewer) ─── */
+.lightbox-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:200;display:none;flex-direction:column;touch-action:none}
+.lightbox-overlay.open{display:flex}
+.lightbox-topbar{display:flex;justify-content:flex-end;padding:0.75rem;flex-shrink:0}
+.lightbox-close{background:rgba(255,255,255,0.15);border:none;color:#fff;width:38px;height:38px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+.lightbox-stage{flex:1;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center}
+.lightbox-img{max-width:100%;max-height:100%;touch-action:none;user-select:none;-webkit-user-drag:none;will-change:transform}
+.lightbox-hint{position:absolute;bottom:1rem;left:0;right:0;text-align:center;color:rgba(255,255,255,0.6);font-size:12px;pointer-events:none}
 
 /* ─── AI LOADING ─── */
 .ai-loading{display:flex;align-items:center;gap:10px;padding:1rem;background:var(--info-soft);border-radius:var(--radius-sm);color:var(--info-text);font-size:14px;font-weight:500}
@@ -499,6 +508,19 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════
+     PHOTO LIGHTBOX — pinch-to-zoom / pan / double-tap viewer
+═══════════════════════════════════════════════════════════ -->
+<div class="lightbox-overlay" id="lightbox-overlay">
+  <div class="lightbox-topbar">
+    <button class="lightbox-close" onclick="closeLightbox()">×</button>
+  </div>
+  <div class="lightbox-stage" id="lightbox-stage">
+    <img class="lightbox-img" id="lightbox-img" src="" alt="Full photo"/>
+    <div class="lightbox-hint">Pinch or double-tap to zoom · drag to pan</div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════════
 // CONFIGURATION — paste your Apps Script Web App URL here
@@ -660,6 +682,116 @@ function getBestPhotoUrl(pod) {
   // No photo available
   return '';
 }
+
+// ═══════════════════════════════════════════════════════════
+// PHOTO LIGHTBOX — pinch-zoom, drag-to-pan, double-tap-to-zoom.
+// Vanilla JS, no library — works for touch (phones) and mouse (desktop).
+// ═══════════════════════════════════════════════════════════
+const LB = {scale:1, x:0, y:0, startDist:0, startScale:1, dragging:false, lastX:0, lastY:0, lastTapTime:0};
+
+function openLightbox(url) {
+  if (!url) return;
+  const overlay = document.getElementById('lightbox-overlay');
+  const img = document.getElementById('lightbox-img');
+  img.src = url;
+  LB.scale = 1; LB.x = 0; LB.y = 0;
+  applyLightboxTransform();
+  overlay.classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox-overlay').classList.remove('open');
+}
+
+function applyLightboxTransform() {
+  const img = document.getElementById('lightbox-img');
+  if (img) img.style.transform = `translate(${LB.x}px, ${LB.y}px) scale(${LB.scale})`;
+}
+
+function lbDist(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+
+(function initLightboxGestures() {
+  const stage = document.getElementById('lightbox-stage');
+  if (!stage) return;
+
+  // Close by tapping the dark backdrop (not the image itself)
+  stage.addEventListener('click', (e) => {
+    if (e.target === stage) closeLightbox();
+  });
+
+  // ── Touch: pinch to zoom, one-finger drag to pan, double-tap to zoom ──
+  stage.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      LB.startDist = lbDist(e.touches);
+      LB.startScale = LB.scale;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - LB.lastTapTime < 300) {
+        // Double-tap: toggle zoom
+        LB.scale = LB.scale > 1 ? 1 : 2.5;
+        LB.x = 0; LB.y = 0;
+        applyLightboxTransform();
+      }
+      LB.lastTapTime = now;
+      LB.dragging = true;
+      LB.lastX = e.touches[0].clientX;
+      LB.lastY = e.touches[0].clientY;
+    }
+  }, {passive:true});
+
+  stage.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+      const dist = lbDist(e.touches);
+      LB.scale = Math.min(6, Math.max(1, LB.startScale * (dist / LB.startDist)));
+      applyLightboxTransform();
+    } else if (e.touches.length === 1 && LB.dragging && LB.scale > 1) {
+      const dx = e.touches[0].clientX - LB.lastX;
+      const dy = e.touches[0].clientY - LB.lastY;
+      LB.x += dx; LB.y += dy;
+      LB.lastX = e.touches[0].clientX;
+      LB.lastY = e.touches[0].clientY;
+      applyLightboxTransform();
+    }
+  }, {passive:true});
+
+  stage.addEventListener('touchend', () => {
+    LB.dragging = false;
+    if (LB.scale < 1) { LB.scale = 1; LB.x = 0; LB.y = 0; applyLightboxTransform(); }
+  });
+
+  // ── Desktop: mouse wheel to zoom, click-drag to pan, double-click to zoom ──
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    LB.scale = Math.min(6, Math.max(1, LB.scale + (e.deltaY < 0 ? 0.2 : -0.2)));
+    if (LB.scale === 1) { LB.x = 0; LB.y = 0; }
+    applyLightboxTransform();
+  }, {passive:false});
+
+  stage.addEventListener('dblclick', () => {
+    LB.scale = LB.scale > 1 ? 1 : 2.5;
+    LB.x = 0; LB.y = 0;
+    applyLightboxTransform();
+  });
+
+  let mouseDown = false;
+  stage.addEventListener('mousedown', (e) => {
+    if (LB.scale <= 1) return;
+    mouseDown = true;
+    LB.lastX = e.clientX; LB.lastY = e.clientY;
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!mouseDown || LB.scale <= 1) return;
+    LB.x += e.clientX - LB.lastX;
+    LB.y += e.clientY - LB.lastY;
+    LB.lastX = e.clientX; LB.lastY = e.clientY;
+    applyLightboxTransform();
+  });
+  window.addEventListener('mouseup', () => { mouseDown = false; });
+})();
 
 // Save pod metadata to localStorage (no photos — those go to sessionStorage)
 function savePodsLocally() {
@@ -1893,6 +2025,15 @@ function renderDispatchQueue() {
     </div>
 
     ${pending.length > 0 ? `
+      <div class="card">
+        <div class="card-title">Pending Invoices (${pending.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${pending.map(p => `<span class="badge badge-err" style="cursor:pointer" onclick="${canReview() ? `openReviewModal('${p.id}')` : ''}">${escHtml(p.invoice || 'No invoice # yet')}</span>`).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    ${pending.length > 0 ? `
       <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Pending review (${pending.length})</div>
       <div class="card" style="padding:0 1.1rem;margin-bottom:0.85rem">
         ${pending.map(pod => podRowHtml(pod, canReview())).join('')}
@@ -1956,7 +2097,7 @@ function renderReviewModal(pod) {
   body.innerHTML = `
     ${getBestPhotoUrl(pod) ? `
       <div style="position:relative;margin-bottom:1rem">
-        <img src="${getBestPhotoUrl(pod)}" class="photo-preview" style="max-height:220px" alt="Invoice photo"/>
+        <img src="${getBestPhotoUrl(pod)}" class="photo-preview" style="max-height:220px" alt="Invoice photo" onclick="openLightbox('${getBestPhotoUrl(pod).replace(/'/g,"&#39;")}')"/>
         ${S.user.role === 'management' ? `
           <div style="display:flex;gap:6px;margin-top:6px">
             <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:7px;background:var(--warn-soft);border:1.5px solid var(--warn);border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--warn-text);position:relative;overflow:hidden">
@@ -2490,7 +2631,7 @@ function openManualEntry(podId) {
   document.getElementById('edit-modal-title').textContent = 'Fill in details manually';
   document.getElementById('edit-modal-body').innerHTML = `
     ${getBestPhotoUrl(pod) ? `
-      <img src="${getBestPhotoUrl(pod)}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid var(--border);margin-bottom:1rem;background:var(--surface3)" alt="Invoice photo"/>
+      <img src="${getBestPhotoUrl(pod)}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid var(--border);margin-bottom:1rem;background:var(--surface3);cursor:zoom-in" alt="Invoice photo" onclick="openLightbox('${getBestPhotoUrl(pod).replace(/'/g,"&#39;")}')"/>
     ` : `
       <div style="background:var(--surface3);border-radius:8px;height:100px;display:flex;align-items:center;justify-content:center;margin-bottom:1rem;color:var(--text3);font-size:13px">Photo uploading — check again shortly</div>
     `}
