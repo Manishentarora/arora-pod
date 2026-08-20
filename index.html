@@ -634,11 +634,23 @@ function clearPhotoSession(podId) {
 // 1. Drive URL (permanent, shareable)
 // 2. sessionStorage base64 (current session)
 // 3. Empty string
+// Google Drive "view" links (https://drive.google.com/file/d/ID/view...)
+// return an HTML viewer page, not raw image bytes — <img> tags can't render
+// them. Convert to a direct-image-serving URL instead.
+function driveDirectUrl(url) {
+  if (!url) return url;
+  const match = url.match(/\/d\/([-\w]{25,})/) || url.match(/[?&]id=([-\w]{25,})/);
+  if (match) {
+    return 'https://lh3.googleusercontent.com/d/' + match[1];
+  }
+  return url;
+}
+
 function getBestPhotoUrl(pod) {
   if (!pod) return '';
   // Priority 1: permanent Drive URL (from Google Sheet)
   if (pod.photoUrl && pod.photoUrl.startsWith('http')) {
-    return pod.photoUrl;
+    return driveDirectUrl(pod.photoUrl);
   }
   // Priority 2: base64 in sessionStorage (current browser session)
   const session = loadPhotoSession(pod.id);
