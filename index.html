@@ -1801,6 +1801,29 @@ function nextDelivery() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// POD ROW — shared list-row renderer used by Queue / Tracker / Incomplete
+// (Was missing from this build — this is what crashed renderDispatchQueue)
+// ═══════════════════════════════════════════════════════════
+function podRowHtml(pod, canReviewFlag) {
+  const overdue = daysOverdue(pod);
+  return `
+    <div class="pod-item" ${canReviewFlag ? `onclick="openReviewModal('${pod.id}')"` : ''}>
+      <div class="pod-icon ${modeClass(pod.mode)}">${modeIcon(pod.mode)}</div>
+      <div class="pod-meta">
+        <div class="pod-inv">${escHtml(pod.invoice || 'Invoice not read')}</div>
+        <div class="pod-cust">${escHtml(pod.customer || 'Customer not read')}</div>
+        <div class="pod-tags">
+          <span class="firm-tag ${pod.firm === 'Firm 2' ? 'f2' : ''}">${escHtml(pod.firm || '')}</span>
+          <span class="mode-tag">${escHtml(pod.mode || '')}</span>
+          ${statusBadgeHtml(pod.status)}
+        </div>
+        ${overdue > 0 ? `<div class="overdue-text">${overdue} day${overdue > 1 ? 's' : ''} overdue</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════
 // DISPATCH — QUEUE
 // ═══════════════════════════════════════════════════════════
 function getEmptyQueueHtml() {
