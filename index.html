@@ -327,32 +327,49 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
       <div class="role-icon">📋</div>
       <div class="role-info">
         <div class="role-name">Dispatch Team</div>
-        <div class="role-desc">Review and confirm PODs</div>
+        <div class="role-desc">Review and confirm PODs for your firm</div>
       </div>
     </div>
     <div class="role-btn" onclick="selectRole('management')" id="role-management">
       <div class="role-icon">📊</div>
       <div class="role-info">
         <div class="role-name">Management / Sales</div>
-        <div class="role-desc">Analytics, tracker &amp; POD review</div>
+        <div class="role-desc">Analytics, tracker &amp; POD review — both firms</div>
       </div>
     </div>
-    <div id="mgmt-password-field" style="display:none;margin-top:10px" class="field">
-      <label class="label" for="login-mgmt-pw">Management password</label>
-      <input type="password" id="login-mgmt-pw" placeholder="Enter password"/>
+    <!-- Dispatch firm + password (shown when Dispatch is selected) -->
+    <div id="dispatch-login-fields" style="display:none;margin-top:10px">
+      <div class="field">
+        <label class="label" for="login-dispatch-firm">Your firm</label>
+        <select id="login-dispatch-firm">
+          <option value="">Select firm...</option>
+          <option value="Firm 1">Firm 1 — Arora Enterprises</option>
+          <option value="Firm 2">Firm 2 — Arora Industrial Traders Pvt Ltd</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="login-dispatch-pw">Dispatch password</label>
+        <input type="password" id="login-dispatch-pw" placeholder="Enter dispatch password"/>
+      </div>
+    </div>
+    <!-- Management firm view + password -->
+    <div id="mgmt-login-fields" style="display:none;margin-top:10px">
+      <div class="field">
+        <label class="label" for="login-mgmt-view">View data for</label>
+        <select id="login-mgmt-view">
+          <option value="Both">Both firms</option>
+          <option value="Firm 1">Firm 1 — Arora Enterprises only</option>
+          <option value="Firm 2">Firm 2 — Arora Industrial Traders only</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="login-mgmt-pw">Management password</label>
+        <input type="password" id="login-mgmt-pw" placeholder="Enter management password"/>
+      </div>
     </div>
     <div style="margin-top:14px" class="field">
       <label class="label" for="login-name">Your name</label>
       <input type="text" id="login-name" placeholder="Enter your full name"/>
-    </div>
-    <div class="field">
-      <label class="label" for="login-firm">Your firm</label>
-      <select id="login-firm">
-        <option value="">Select firm...</option>
-        <option value="Firm 1">Firm 1 — Arora Enterprises</option>
-        <option value="Firm 2">Firm 2 — Arora Industrial Traders Pvt Ltd</option>
-        <option value="Both">Both Firms (Dispatch / Management)</option>
-      </select>
     </div>
     <button class="btn btn-primary" onclick="doLogin()" style="margin-top:6px">Enter →</button>
     <div style="text-align:center;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
@@ -415,7 +432,10 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
   <div class="topbar" id="topbar">
     <button class="topbar-back" id="back-btn" onclick="goBack()" style="display:none">←</button>
     <div class="topbar-logo" id="topbar-title">Arora <span>POD</span></div>
-    <div class="topbar-role" id="topbar-role">Driver</div>
+    <div id="topbar-firm-toggle" style="display:none">
+      <button onclick="cycleFirmView()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;cursor:pointer;font-family:inherit" id="firm-toggle-btn">Both firms</button>
+    </div>
+    <div class="topbar-role" id="topbar-role" style="cursor:pointer" onclick="confirmLogout()" title="Tap to log out">Driver ⏏</div>
   </div>
   <div id="sync-indicator" style="display:none;font-size:11px;font-weight:600;padding:4px 1rem;text-align:center;flex-shrink:0"></div>
 
@@ -576,9 +596,12 @@ function fetchWithTimeout(url, options, timeoutMs) {
 
 async function sheetFetch() {
   if (!hasBackend()) return null;
+  // Dispatch: server filters to their firm. Management 'Both': fetch all.
+  const firmParam = (S.user && S.user.firm && S.user.firm !== 'Both')
+    ? encodeURIComponent(S.user.firm) : 'all';
   try {
     const res = await fetchWithTimeout(
-      S.backendUrl + '?action=fetchPODs&firm=all',
+      S.backendUrl + '?action=fetchPODs&firm=' + firmParam,
       { method: 'GET', redirect: 'follow' },
       15000
     );
@@ -1567,48 +1590,58 @@ function selectRole(role) {
   document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('selected'));
   const el = document.getElementById('role-' + role);
   if (el) el.classList.add('selected');
-  // Show password field only for management
-  const pwField = document.getElementById('mgmt-password-field');
-  if (pwField) pwField.style.display = role === 'management' ? 'block' : 'none';
+  document.getElementById('dispatch-login-fields').style.display = role === 'dispatch' ? 'block' : 'none';
+  document.getElementById('mgmt-login-fields').style.display    = role === 'management' ? 'block' : 'none';
 }
 
 async function doLogin() {
   const name = document.getElementById('login-name').value.trim();
-  const firm = document.getElementById('login-firm').value;
   if (!selectedRole) { showToast('Please select a role'); return; }
   if (!name)         { showToast('Please enter your name'); return; }
-  if (!firm)         { showToast('Please select your firm'); return; }
 
-  if (selectedRole === 'management') {
-    const pw = (document.getElementById('login-mgmt-pw').value || '').trim();
-    if (!pw) { showToast('Please enter the management password'); return; }
-    // Verify against backend if connected, else check cached hash
-    const verified = await verifyManagementPassword(pw);
+  if (selectedRole === 'dispatch') {
+    const firm = document.getElementById('login-dispatch-firm').value;
+    const pw   = (document.getElementById('login-dispatch-pw').value || '').trim();
+    if (!firm) { showToast('Please select your firm'); return; }
+    if (!pw)   { showToast('Please enter the dispatch password'); return; }
+    const verified = await verifyRolePassword('dispatch', firm, pw);
     if (!verified) {
-      showToast('Incorrect password');
+      showToast('Incorrect dispatch password');
+      document.getElementById('login-dispatch-pw').value = '';
+      return;
+    }
+    S.user = {name, role:'dispatch', firm};
+
+  } else if (selectedRole === 'management') {
+    const firmView = document.getElementById('login-mgmt-view').value || 'Both';
+    const pw       = (document.getElementById('login-mgmt-pw').value || '').trim();
+    if (!pw) { showToast('Please enter the management password'); return; }
+    const verified = await verifyRolePassword('management', null, pw);
+    if (!verified) {
+      showToast('Incorrect management password');
       document.getElementById('login-mgmt-pw').value = '';
       return;
     }
+    // Management firm view: 'Both' means see everything; 'Firm 1'/'Firm 2' filters
+    S.user = {name, role:'management', firm: firmView};
   }
 
-  S.user = {name, role: selectedRole, firm};
   document.getElementById('login-screen').style.display = 'none';
   enterApp();
 }
 
-async function verifyManagementPassword(pw) {
-  // Try backend first
+async function verifyRolePassword(role, firm, pw) {
   if (hasBackend()) {
     try {
-      const res = await sheetPost({action:'verifyPassword', password:pw});
+      const res = await sheetPost({action:'verifyPassword', role, firm, password:pw});
       if (res && typeof res.match !== 'undefined') return res.match;
     } catch(e) {}
   }
-  // Fallback: check locally cached password hash
-  const cached = localStorage.getItem('arora_mgmt_pw_hash');
+  // Fallback: locally cached hashes (set after successful online verify)
+  const cacheKey = 'arora_pw_hash_' + role + '_' + (firm||'mgmt');
+  const cached = localStorage.getItem(cacheKey);
   if (cached) return cached === simpleHash(pw);
-  // No backend, no cache — allow with warning (first-time)
-  showToast('Warning: No backend connected — password not verified');
+  showToast('Warning: No backend — password not verified');
   return true;
 }
 
@@ -1622,18 +1655,64 @@ function simpleHash(str) {
   return String(Math.abs(hash));
 }
 
+function confirmLogout() {
+  if (S.user && S.user.role === 'driver') return; // drivers use "Reset device" in settings
+  if (!confirm('Log out and return to login screen?')) return;
+  // Clear session state but keep device-level settings (backend URL, driver profile)
+  S.user = null; S.pods = []; S.screen = null; S.sheetLoaded = false;
+  selectedRole = null;
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('topbar-firm-toggle').style.display = 'none';
+  showLoginScreen();
+}
+
+function updateFirmToggleLabel() {
+  const btn = document.getElementById('firm-toggle-btn');
+  if (!btn) return;
+  const labels = {'Both':'Both firms', 'Firm 1':'Firm 1 only', 'Firm 2':'Firm 2 only'};
+  btn.textContent = labels[S.user.firm] || 'Both firms';
+}
+
+function cycleFirmView() {
+  if (!S.user || S.user.role !== 'management') return;
+  const cycle = {'Both':'Firm 1', 'Firm 1':'Firm 2', 'Firm 2':'Both'};
+  S.user.firm = cycle[S.user.firm] || 'Both';
+  updateFirmToggleLabel();
+  S.sheetLoaded = false;
+  S.pods = [];
+  loadPodsFromSheet();
+}
+
+// Management: set dispatch passwords for each firm
+async function changeDispatchPassword(firm) {
+  const key = firm === 'Firm 1' ? 'DISPATCH_F1_PASSWORD' : 'DISPATCH_F2_PASSWORD';
+  const nw1 = prompt('New dispatch password for ' + firm + ':');
+  if (!nw1) return;
+  const nw2 = prompt('Confirm new password:');
+  if (nw1 !== nw2) { showToast('Passwords do not match'); return; }
+  if (hasBackend()) {
+    const res = await sheetPost({
+      action:'changePassword', targetKey:key,
+      newPassword:nw1, byManagement:true
+    });
+    showToast(res && res.success ? firm + ' dispatch password changed' : 'Could not change — check connection');
+  } else {
+    showToast('No backend connected');
+  }
+}
+
 async function changeManagementPassword() {
-  const cur = prompt('Enter current password:');
+  const cur = prompt('Enter current management password:');
   if (!cur) return;
   const nw1 = prompt('Enter new password:');
   if (!nw1) return;
   const nw2 = prompt('Confirm new password:');
   if (nw1 !== nw2) { showToast('Passwords do not match'); return; }
   if (hasBackend()) {
-    const res = await sheetPost({action:'changePassword', currentPassword:cur, newPassword:nw1});
+    const res = await sheetPost({action:'changePassword', targetKey:'MGMT_PASSWORD', currentPassword:cur, newPassword:nw1});
     if (res && res.success) {
-      localStorage.setItem('arora_mgmt_pw_hash', simpleHash(nw1));
-      showToast('Password changed successfully');
+      localStorage.setItem('arora_pw_hash_management_mgmt', simpleHash(nw1));
+      showToast('Management password changed');
     } else {
       showToast(res && res.error ? res.error : 'Password change failed');
     }
@@ -1648,7 +1727,17 @@ function enterApp() {
   document.getElementById('driver-setup-screen').style.display = 'none';
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'flex';
-  document.getElementById('topbar-role').textContent = S.user.name;
+  document.getElementById('topbar-role').textContent = S.user.name + ' ⏏';
+  document.getElementById('topbar-role').title = 'Tap to log out';
+
+  // Show firm-view toggle for management only
+  const firmToggle = document.getElementById('topbar-firm-toggle');
+  if (S.user.role === 'management') {
+    firmToggle.style.display = 'block';
+    updateFirmToggleLabel();
+  } else {
+    firmToggle.style.display = 'none';
+  }
 
   const role = S.user.role;
   const navMap = {driver:'nav-driver', dispatch:'nav-dispatch', management:'nav-management'};
@@ -2931,71 +3020,120 @@ async function fetchSerialCompleteness(firm, fy) {
 async function renderSerialTracker() {
   setNavActive('nav-management', 'nav-serials');
   const c = document.getElementById('main-content');
-  c.innerHTML = `<div style="text-align:center;padding:3rem 1rem"><div class="spinner" style="margin:0 auto 1rem"></div><p style="color:var(--text3)">Checking invoice completeness...</p></div>`;
+  c.innerHTML = `<div style="text-align:center;padding:3rem 1rem"><div class="spinner" style="margin:0 auto 1rem"></div><p style="color:var(--text3)">Building invoice register...</p></div>`;
 
   const fy = currentFinancialYearClient();
-  const [f1, f2] = await Promise.all([
-    fetchSerialCompleteness('Firm 1', fy),
-    fetchSerialCompleteness('Firm 2', fy),
-  ]);
-  S.serialCompleteness = {fy, f1, f2};
+
+  // Dispatch only sees their own firm; management sees based on current view
+  const firmsToShow = (S.user.role === 'dispatch')
+    ? [S.user.firm]
+    : (S.user.firm === 'Both' ? ['Firm 1','Firm 2'] : [S.user.firm]);
+
+  const results = await Promise.all(firmsToShow.map(f => fetchSerialCompleteness(f, fy)));
+
+  // Build a lookup of serial → pod for status display
+  const serialToPod = {};
+  S.pods.forEach(p => {
+    if (!p.invoice) return;
+    const parts = String(p.invoice).split('/');
+    const num = parseInt(parts[parts.length-1]);
+    if (!isNaN(num)) serialToPod[p.firm + '|' + num] = p;
+  });
+
+  function statusBadge(pod) {
+    if (!pod) return '<span class="badge badge-grey">No image</span>';
+    if (pod.status === 'approved')   return '<span class="badge badge-ok">✓ Approved</span>';
+    if (pod.status === 'incomplete') return '<span class="badge badge-warn">⚠ Incomplete</span>';
+    if (pod.aiStatus === 'processing') return '<span class="badge badge-info">↑ Uploaded</span>';
+    return '<span class="badge badge-err">● Pending</span>';
+  }
 
   function firmBlock(label, res) {
-    if (!res) return `<div class="card"><div class="card-title">${label} — FY ${fy}</div><div style="font-size:13px;color:var(--text3)">Could not load — check connection</div></div>`;
+    if (!res) return `<div class="card"><div class="card-title">${label}</div><div style="font-size:13px;color:var(--text3)">Could not load</div></div>`;
     const missing = res.missing || [];
-    return `
+    const exSet   = new Set((res.exceptions||[]).map(e=>e.serial));
+
+    // Summary
+    let html = `
       <div class="card">
         <div class="card-title">${label} — FY ${fy}</div>
-        <div class="pod-tags" style="margin-bottom:${missing.length?'0.75rem':'0'}">
-          <span class="badge badge-info">${res.totalUsed} invoices used</span>
+        <div class="pod-tags" style="margin-bottom:1rem">
+          <span class="badge badge-info">${res.totalUsed} invoices</span>
           <span class="badge badge-grey">up to #${res.maxSerial}</span>
           ${missing.length > 0
             ? `<span class="badge badge-err">⚠ ${missing.length} missing</span>`
-            : '<span class="badge badge-ok">✓ Complete</span>'}
+            : '<span class="badge badge-ok">✓ No gaps</span>'}
+        </div>`;
+
+    // Gap summary chips
+    if (missing.length > 0) {
+      html += `<div style="margin-bottom:0.75rem">
+        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:4px">MISSING / NOT UPLOADED</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          ${missing.map(s=>`<span class="badge badge-err" style="cursor:pointer" onclick="showMarkExceptionModal('${label}','${fy}',${s})">#${s}</span>`).join('')}
         </div>
-        ${missing.length > 0 ? `
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${missing.map(s => `<span class="badge badge-err" style="cursor:pointer" onclick="showMarkExceptionModal('${label}','${fy}',${s})">#${s}</span>`).join('')}
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:6px">Tap a number to mark it cancelled/explained</div>
-        ` : ''}
-      </div>
-    `;
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Tap a number to mark it cancelled/explained</div>
+      </div>`;
+    }
+
+    html += `</div>`;
+
+    // Full register table
+    if (res.maxSerial > 0) {
+      html += `
+        <div class="card" style="padding:0">
+          <div style="padding:0.75rem 1rem;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:12px;font-weight:700;color:var(--text2)">${label} — Full register (#1 → #${res.maxSerial})</span>
+          </div>`;
+      for (let s = 1; s <= res.maxSerial; s++) {
+        const pod = serialToPod[label+'|'+s];
+        const isException = exSet.has(s);
+        const ex = isException ? (res.exceptions||[]).find(e=>e.serial===s) : null;
+        html += `<div style="padding:0.6rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <span style="font-size:13px;font-weight:700;color:var(--text2);width:42px;flex-shrink:0">#${s}</span>
+          <span style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${pod ? escHtml(pod.invoice||'') + (pod.customer ? ' — ' + escHtml(pod.customer) : '') : (isException ? escHtml(ex.reason + (ex.note?': '+ex.note:'')) : '—')}
+          </span>
+          ${isException
+            ? '<span class="badge badge-grey">Cancelled</span>'
+            : statusBadge(pod)}
+        </div>`;
+      }
+      html += `</div>`;
+    }
+    return html;
   }
 
-  function exceptionsBlock(label, res) {
-    const ex = (res && res.exceptions) || [];
-    if (!ex.length) return '';
-    return `
-      <div class="section-hd">${label} — cancelled / explained</div>
-      ${ex.map(e => `
-        <div class="esc-item esc-dispatch">
-          <div class="esc-inv">#${e.serial} — ${escHtml(e.reason)}</div>
-          <div class="esc-detail">${escHtml(e.note || '')} ${e.markedBy ? '· by ' + escHtml(e.markedBy) : ''} · ${escHtml(String(e.at||''))}</div>
-        </div>
-      `).join('')}
-    `;
+  let html = results.map((res,i) => firmBlock(firmsToShow[i], res)).join('');
+
+  // Cancelled/explained entries section
+  results.forEach((res,i) => {
+    const ex = (res && res.exceptions)||[];
+    if (!ex.length) return;
+    html += `<div class="section-hd">${firmsToShow[i]} — Cancelled / explained</div>`;
+    ex.forEach(e => {
+      html += `<div class="esc-item esc-dispatch">
+        <div class="esc-inv">#${e.serial} — ${escHtml(e.reason)}</div>
+        <div class="esc-detail">${escHtml(e.note||'')} ${e.markedBy?'· by '+escHtml(e.markedBy):''} · ${escHtml(String(e.at||''))}</div>
+      </div>`;
+    });
+  });
+
+  html += `<div style="margin-top:1rem">
+    <button class="btn btn-outline" onclick="showMarkExceptionModal('${firmsToShow[0]}','${fy}','')" style="margin-bottom:0.5rem">+ Mark a serial as cancelled</button>`;
+
+  if (S.user.role === 'management') {
+    html += `
+    <div style="margin-top:1rem;display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-outline" onclick="changeManagementPassword()" style="font-size:13px">🔒 Change management password</button>
+      <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 1')" style="font-size:13px">🔑 Set Firm 1 dispatch password</button>
+      <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 2')" style="font-size:13px">🔑 Set Firm 2 dispatch password</button>
+      <button class="btn btn-outline" onclick="showDiagnostics()" style="font-size:13px">🔍 Diagnostics</button>
+    </div>`;
   }
+  html += `</div>`;
 
-  c.innerHTML = `
-    <div class="section-hd">Invoice completeness — checked live against real submissions</div>
-    ${firmBlock('Firm 1', f1)}
-    ${firmBlock('Firm 2', f2)}
-
-    <div style="margin-top:0.5rem">
-      <button class="btn btn-outline" onclick="showMarkExceptionModal('Firm 1','${fy}','')">+ Mark a serial as cancelled directly</button>
-    </div>
-
-    ${exceptionsBlock('Firm 1', f1)}
-    ${exceptionsBlock('Firm 2', f2)}
-
-    <div style="margin-top:1.5rem">
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-outline" onclick="changeManagementPassword()" style="font-size:13px;flex:1">🔒 Change password</button>
-        <button class="btn btn-outline" onclick="showDiagnostics()" style="font-size:13px;flex:1">🔍 Diagnostics</button>
-      </div>
-    </div>
-  `;
+  c.innerHTML = html;
 }
 
 function showMarkExceptionModal(firm, fy, serial) {
