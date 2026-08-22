@@ -1519,7 +1519,7 @@ function showDiagnostics() {
               <span style="font-size:13px;font-weight:700">${escHtml(p.invoice||'No invoice read')}</span>
               <span class="badge ${p.status==='approved'?'badge-ok':p.status==='incomplete'?'badge-warn':'badge-err'}">${p.status}</span>
             </div>
-            <div style="font-size:12px;color:var(--text2);margin-bottom:4px">${escHtml(p.customer||'Customer not read')} · ${escHtml(p.driver)}</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:4px">${escHtml(p.dispatchDate||'')} · ${escHtml(p.driver)}</div>
             <div style="font-size:11px;font-weight:600;color:${photoColor};margin-bottom:4px">${photoStatus}</div>
             ${driveUrl ? `<a href="${driveUrl}" target="_blank" style="font-size:11px;color:var(--info);word-break:break-all">📎 Open in Drive</a>` : ''}
             ${hasSession && !driveUrl ? `<span style="font-size:11px;color:var(--warn-text)">Photo in session — will upload to Drive when connected</span>` : ''}
@@ -2091,7 +2091,7 @@ function closeReviewModal() {
 }
 
 function renderReviewModal(pod) {
-  document.getElementById('review-modal-title').textContent = pod.invoice + ' — ' + pod.customer;
+  document.getElementById('review-modal-title').textContent = pod.invoice || 'Invoice not read';
 
   const body = document.getElementById('review-modal-body');
   body.innerHTML = `
@@ -2128,11 +2128,11 @@ function renderReviewModal(pod) {
       <span class="badge badge-grey">By: ${escHtml(pod.driver)}</span>
     </div>
 
-    <div class="section-hd">Extracted details — tap Edit to fix or fill in</div>
+    <div class="section-hd">Invoice details — tap Edit to correct</div>
     <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem">
       <div class="extracted-field"><span class="ef-label">Invoice</span><span class="ef-val">${escHtml(pod.invoice||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','invoiceNo','Invoice number',${JSON.stringify(pod.invoice||'')})">Edit</span></div>
+      <div class="extracted-field"><span class="ef-label">Invoice date</span><span class="ef-val">${escHtml(pod.dispatchDate||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','dispatchDate','Invoice date (YYYY-MM-DD)',${JSON.stringify(pod.dispatchDate||'')})">Edit</span></div>
       <div class="extracted-field"><span class="ef-label">Customer</span><span class="ef-val">${escHtml(pod.customer||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','customer','Customer name',${JSON.stringify(pod.customer||'')})">Edit</span></div>
-      <div class="extracted-field"><span class="ef-label">Mobile</span><span class="ef-val">${escHtml(pod.mobile||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','mobile','Mobile number \u2014 check near the signature',${JSON.stringify(pod.mobile||'')})">Edit</span></div>
       ${pod.docket ? `<div class="extracted-field"><span class="ef-label">Docket/LR</span><span class="ef-val">${escHtml(pod.docket)}</span></div>` : ''}
     </div>
 
@@ -2281,7 +2281,7 @@ function editPodField(podId, fieldKey, label, currentValue) {
   const trimmed = entered.trim();
 
   // Update locally so the modal reflects the change immediately
-  const localFieldMap = {invoiceNo:'invoice', customer:'customer', mobile:'mobile'};
+  const localFieldMap = {invoiceNo:'invoice', customer:'customer', mobile:'mobile', dispatchDate:'dispatchDate'};
   const localKey = localFieldMap[fieldKey] || fieldKey;
   pod[localKey] = trimmed;
   savePodsLocally();
@@ -2633,7 +2633,7 @@ function renderUnclearQueue() {
               <div class="pod-inv" style="color:var(--warn-text)">
                 ${pod.invoice || 'Invoice not read'}
               </div>
-              <div class="pod-cust">${pod.customer || 'Customer not read'}</div>
+              <div class="pod-cust">${escHtml(pod.customer || 'Customer not read')}</div>
               <div class="pod-tags">
                 <span class="firm-tag ${pod.firm==='Firm 2'?'f2':''}">${pod.firm||'Firm ?'}</span>
                 <span class="badge badge-warn">${pod.aiStatus === 'processing' ? 'Still processing...' : 'Unclear image'}</span>
@@ -2675,19 +2675,11 @@ function openManualEntry(podId) {
     </div>
     <div class="field">
       <label class="label">Invoice number</label>
-      <input type="text" id="me-invoice" value="${escHtml(pod.invoice||'')}" placeholder="e.g. 26-27/1025"/>
+      <input type="text" id="me-invoice" value="${escHtml(pod.invoice||'')}" placeholder="e.g. GST/26-27/4258"/>
     </div>
     <div class="field">
-      <label class="label">Customer name</label>
-      <input type="text" id="me-customer" value="${escHtml(pod.customer||'')}" placeholder="Customer company name"/>
-    </div>
-    <div class="field">
-      <label class="label">Customer mobile</label>
-      <input type="tel" id="me-mobile" value="${escHtml(pod.mobile||'')}" placeholder="10-digit mobile"/>
-    </div>
-    <div class="field">
-      <label class="label">Customer email <span style="color:var(--text3);font-weight:400">(if visible)</span></label>
-      <input type="email" id="me-email" value="${escHtml(pod.email||'')}" placeholder="email@company.com"/>
+      <label class="label">Invoice date</label>
+      <input type="date" id="me-date" value="${escHtml(pod.dispatchDate||'')}"/>
     </div>
     <div class="btn-group" style="margin-top:0.75rem">
       <button class="btn btn-outline" onclick="document.getElementById('edit-modal').classList.remove('open')">Cancel</button>
@@ -2704,20 +2696,16 @@ function saveManualEntry(podId) {
 
   const firm     = document.getElementById('me-firm').value;
   const invoice  = document.getElementById('me-invoice').value.trim();
-  const customer = document.getElementById('me-customer').value.trim();
-  const mobile   = document.getElementById('me-mobile').value.trim();
-  const email    = document.getElementById('me-email').value.trim();
+  const dateVal  = document.getElementById('me-date').value;
 
-  if (!invoice && !customer) { showToast('Fill in at least invoice number or customer name'); return; }
+  if (!invoice) { showToast('Invoice number is required'); return; }
 
   // Update pod
-  pod.firm     = firm;
-  pod.invoice  = invoice;
-  pod.customer = customer;
-  pod.mobile   = mobile;
-  pod.email    = email;
-  pod.aiStatus = 'done';        // mark as resolved
-  pod.status   = 'pending';     // goes to normal dispatch queue
+  pod.firm         = firm;
+  pod.invoice      = invoice;
+  if (dateVal) pod.dispatchDate = dateVal;
+  pod.aiStatus     = 'done';        // mark as resolved
+  pod.status       = 'pending';     // goes to normal dispatch queue
 
   savePodsLocally();
   updateBadges();
@@ -2727,13 +2715,11 @@ function saveManualEntry(podId) {
   // Update Sheet with manually entered details
   if (hasBackend()) {
     sheetPost({
-      action:    'updatePodDetails',
-      id:        pod.id,
-      firm:      pod.firm,
-      invoiceNo: pod.invoice,
-      customer:  pod.customer,
-      mobile:    pod.mobile,
-      email:     pod.email,
+      action:       'updatePodDetails',
+      id:           pod.id,
+      firm:         pod.firm,
+      invoiceNo:    pod.invoice,
+      dispatchDate: dateVal || '',
       aiConfidence: 'manual',
     }).then(res => setSyncStatus(res && res.success ? 'ok' : 'error'));
   }
