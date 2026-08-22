@@ -2128,11 +2128,11 @@ function renderReviewModal(pod) {
       <span class="badge badge-grey">By: ${escHtml(pod.driver)}</span>
     </div>
 
-    <div class="section-hd">Extracted details</div>
+    <div class="section-hd">Extracted details — tap Edit to fix or fill in</div>
     <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem">
-      <div class="extracted-field"><span class="ef-label">Invoice</span><span class="ef-val">${escHtml(pod.invoice)}</span></div>
-      <div class="extracted-field"><span class="ef-label">Customer</span><span class="ef-val">${escHtml(pod.customer)}</span></div>
-      <div class="extracted-field"><span class="ef-label">Mobile</span><span class="ef-val">${escHtml(pod.mobile||'—')}</span></div>
+      <div class="extracted-field"><span class="ef-label">Invoice</span><span class="ef-val">${escHtml(pod.invoice||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','invoiceNo','Invoice number',${JSON.stringify(pod.invoice||'')})">Edit</span></div>
+      <div class="extracted-field"><span class="ef-label">Customer</span><span class="ef-val">${escHtml(pod.customer||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','customer','Customer name',${JSON.stringify(pod.customer||'')})">Edit</span></div>
+      <div class="extracted-field"><span class="ef-label">Mobile</span><span class="ef-val">${escHtml(pod.mobile||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','mobile','Mobile number \u2014 check near the signature',${JSON.stringify(pod.mobile||'')})">Edit</span></div>
       ${pod.docket ? `<div class="extracted-field"><span class="ef-label">Docket/LR</span><span class="ef-val">${escHtml(pod.docket)}</span></div>` : ''}
     </div>
 
@@ -2267,6 +2267,32 @@ function deleteReviewPhoto(podId) {
   savePodsLocally();
   renderReviewModal(pod);
   showToast('Photo removed');
+}
+
+// Let dispatch correct or fill in a field after visually reading the photo —
+// mainly for handwritten details (like the mobile number near the signature)
+// that OCR cannot reliably read. Reuses the existing updatePodDetails backend
+// action, same one the Unclear queue's manual-entry screen already uses.
+function editPodField(podId, fieldKey, label, currentValue) {
+  const pod = S.pods.find(p => p.id === podId);
+  if (!pod) return;
+  const entered = prompt('Edit ' + label + ':', currentValue || '');
+  if (entered === null) return; // cancelled
+  const trimmed = entered.trim();
+
+  // Update locally so the modal reflects the change immediately
+  const localFieldMap = {invoiceNo:'invoice', customer:'customer', mobile:'mobile'};
+  const localKey = localFieldMap[fieldKey] || fieldKey;
+  pod[localKey] = trimmed;
+  savePodsLocally();
+  renderReviewModal(pod);
+  showToast('Saved');
+
+  // Persist to the Sheet
+  const payload = {action:'updatePodDetails', id: podId};
+  payload[fieldKey] = trimmed;
+  sheetPost(payload).then(res => setSyncStatus(res && res.success ? 'ok' : 'error'));
+  setSyncStatus('syncing');
 }
 
 // ═══════════════════════════════════════════════════════════
