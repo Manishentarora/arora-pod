@@ -2040,8 +2040,15 @@ function nextDelivery() {
 // ═══════════════════════════════════════════════════════════
 function podRowHtml(pod, canReviewFlag) {
   const overdue = daysOverdue(pod);
+  const approved  = pod.status === 'approved';
+  const incomplete = pod.status === 'incomplete';
+  const rowExtra = approved
+    ? ' style="border-left:3px solid var(--ok);background:var(--ok-soft);margin:0 -1.1rem;padding:0.9rem 1.1rem 0.9rem 1rem;"'
+    : incomplete
+    ? ' style="border-left:3px solid var(--warn);background:var(--warn-soft);margin:0 -1.1rem;padding:0.9rem 1.1rem 0.9rem 1rem;"'
+    : '';
   return `
-    <div class="pod-item" ${canReviewFlag ? `onclick="openReviewModal('${pod.id}')"` : ''}>
+    <div class="pod-item"${rowExtra} ${canReviewFlag ? `onclick="openReviewModal('${pod.id}')"` : ''}>
       <div class="pod-icon ${modeClass(pod.mode)}">${modeIcon(pod.mode)}</div>
       <div class="pod-meta">
         <div class="pod-inv">${escHtml(pod.invoice || 'Invoice not read')}</div>
