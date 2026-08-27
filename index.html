@@ -1248,10 +1248,11 @@ function modeClass(mode) {
   const m = {'Own Fleet':'fleet','Courier':'courier','Porter':'porter','Transport':'transport','Self Pickup':'pickup','Salesperson':'sales'};
   return m[mode] || 'courier';
 }
-function statusBadgeHtml(status) {
-  if (status === 'approved') return '<span class="badge badge-ok">✓ Approved</span>';
-  if (status === 'incomplete') return '<span class="badge badge-warn">⚠ Incomplete</span>';
-  if (status === 'pending') return '<span class="badge badge-err">● Pending review</span>';
+function statusBadgeHtml(status, review) {
+  const by = review && review.by ? ' · ' + review.by.split(' ')[0] : '';
+  if (status === 'approved')   return '<span class="badge badge-ok">✓ Approved' + by + '</span>';
+  if (status === 'incomplete') return '<span class="badge badge-warn">⚠ Incomplete' + by + '</span>';
+  if (status === 'pending')    return '<span class="badge badge-err">● Pending review</span>';
   return '<span class="badge badge-grey">Unknown</span>';
 }
 function pendingPods() { return S.pods.filter(p => p.status === 'pending' && p.aiStatus !== 'unclear' && p.aiStatus !== 'processing'); }
@@ -2048,7 +2049,7 @@ function podRowHtml(pod, canReviewFlag) {
         <div class="pod-tags">
           <span class="firm-tag ${pod.firm === 'Firm 2' ? 'f2' : ''}">${escHtml(pod.firm || '')}</span>
           <span class="mode-tag">${escHtml(pod.mode || '')}</span>
-          ${statusBadgeHtml(pod.status)}
+          ${statusBadgeHtml(pod.status, pod.dispatchReview)}
         </div>
         ${overdue > 0 ? `<div class="overdue-text">${overdue} day${overdue > 1 ? 's' : ''} overdue</div>` : ''}
       </div>
@@ -2217,6 +2218,11 @@ function renderReviewModal(pod) {
       <span class="badge badge-grey">By: ${escHtml(pod.driver)}</span>
     </div>
 
+    ${pod.dispatchReview ? `<div style="background:var(--ok-soft);border-radius:8px;padding:0.6rem 1rem;margin-bottom:1rem;font-size:12px;color:var(--ok-text);display:flex;align-items:center;gap:8px;">
+      <span style="font-size:16px">✓</span>
+      <span>Reviewed by <strong>${escHtml(pod.dispatchReview.by||'')}</strong>
+      ${pod.dispatchReview.ts ? '· ' + new Date(pod.dispatchReview.ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) + ' ' + new Date(pod.dispatchReview.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : ''}</span>
+    </div>` : ''}
     <div class="section-hd">Invoice details — tap Edit to correct</div>
     <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem">
       <div class="extracted-field"><span class="ef-label">Invoice</span><span class="ef-val">${escHtml(pod.invoice||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','invoiceNo','Invoice number',${JSON.stringify(pod.invoice||'')})">Edit</span></div>
