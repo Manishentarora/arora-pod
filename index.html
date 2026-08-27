@@ -2252,6 +2252,11 @@ function renderReviewModal(pod) {
       <button class="btn btn-outline" onclick="closeReviewModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveReview()">Save review →</button>
     </div>
+    ${S.user.role === 'management' ? `
+    <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Management override — bypasses all checks</div>
+      <button class="btn btn-success" style="width:100%" onclick="managementApprove()">✓ Force Approve (Management)</button>
+    </div>` : ''}
     <div style="height:1rem"></div>
   `;
 }
@@ -2318,6 +2323,39 @@ function saveReview() {
       signature:       reviewState.signature,
       mobileConfirmed: reviewState.mobile,
       nameConfirmed:   reviewState.name,
+    }).then(res => setSyncStatus(res && res.success ? 'ok' : 'error'));
+    setSyncStatus('syncing');
+  }
+}
+
+// Management override — approve regardless of stamp/signature/mobile/name
+function managementApprove() {
+  const pod = S.pods.find(p => p.id === S.reviewingId);
+  if (!pod) return;
+  if (!confirm('Force approve this POD as management? This overrides all dispatch checks.')) return;
+
+  pod.dispatchReview = {
+    stamp: true, signature: true, mobile: true, name: true,
+    by: S.user.name + ' (mgmt override)',
+    ts: Date.now(),
+  };
+  pod.status = 'approved';
+
+  closeReviewModal();
+  updateBadges();
+  showToast('✓ POD approved by management');
+  showScreen('dispatch-queue', false);
+
+  if (hasBackend()) {
+    sheetPost({
+      action:          'saveReview',
+      podId:           pod.id,
+      reviewedBy:      S.user.name + ' (management override)',
+      stamp:           true,
+      signature:       true,
+      mobileConfirmed: true,
+      nameConfirmed:   true,
+      managementOverride: true,
     }).then(res => setSyncStatus(res && res.success ? 'ok' : 'error'));
     setSyncStatus('syncing');
   }
