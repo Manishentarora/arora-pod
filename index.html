@@ -601,7 +601,7 @@ async function sheetFetch() {
     ? encodeURIComponent(S.user.firm) : 'all';
   try {
     const res = await fetchWithTimeout(
-      S.backendUrl + '?action=fetchPODs&firm=' + firmParam,
+      S.backendUrl + '?action=fetchPODs&firm=' + firmParam + '&apiSecret=' + encodeURIComponent(localStorage.getItem('arora_api_secret')||''),
       { method: 'GET', redirect: 'follow' },
       15000
     );
@@ -629,9 +629,12 @@ async function sheetPost(payload) {
     // Use no-cors mode to bypass CORS restrictions on Android Chrome.
     // This means we cannot read the response, but the POST goes through.
     // Apps Script receives and processes it correctly.
+    // apiSecret is sent with every request — backend rejects calls without it,
+    // protecting against anyone who finds the public backend URL.
+    const secret = localStorage.getItem('arora_api_secret') || '';
     await fetch(S.backendUrl, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({...payload, apiSecret: secret}),
       mode: 'no-cors',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
     });
@@ -1041,6 +1044,10 @@ async function saveBackendUrl() {
   if (testResult && testResult.success) {
     // Save permanently
     localStorage.setItem('arora_backend_url', url);
+    const secretInput = document.getElementById('edit-api-secret');
+    if (secretInput && secretInput.value.trim()) {
+      localStorage.setItem('arora_api_secret', secretInput.value.trim());
+    }
     const banner = document.getElementById('config-banner');
     if (banner) banner.remove();
     if (statusEl) { statusEl.textContent = '✅ Connected! Loading your data...'; statusEl.style.color = 'var(--ok-text)'; }
@@ -1430,6 +1437,12 @@ function showDriverSettings() {
       <input type="text" id="edit-backend-url" value="${escHtml(S.backendUrl||'')}"
         placeholder="Apps Script Web App URL" style="font-size:12px"/>
       <div style="font-size:11px;color:var(--text3);margin-top:3px">Required for photos to reach the office</div>
+    </div>
+    <div style="margin-top:0.75rem" class="field">
+      <label class="label" for="edit-api-secret">API Secret</label>
+      <input type="password" id="edit-api-secret" value="${escHtml(localStorage.getItem('arora_api_secret')||'')}"
+        placeholder="Paste the API secret key" style="font-size:12px"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:3px">From Config tab — API_SECRET row</div>
     </div>
     <div style="margin-top:1.5rem;text-align:center">
       <button onclick="clearDriverProfile()" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;font-family:inherit">Reset this device (logout)</button>
@@ -3060,7 +3073,7 @@ async function fetchSerialCompleteness(firm, fy) {
   if (!hasBackend()) return null;
   try {
     const res = await fetchWithTimeout(
-      S.backendUrl + '?action=getSerialCompleteness&firm=' + encodeURIComponent(firm) + '&fy=' + encodeURIComponent(fy),
+      S.backendUrl + '?action=getSerialCompleteness&firm=' + encodeURIComponent(firm) + '&fy=' + encodeURIComponent(fy) + '&apiSecret=' + encodeURIComponent(localStorage.getItem('arora_api_secret')||''),
       {method:'GET', redirect:'follow'}, 15000
     );
     const data = JSON.parse(await res.text());
@@ -3303,24 +3316,19 @@ async function doDeflag(firm, financialYear, serial) {
 
 // 1. Dynamically create and inject the web app manifest
 (function injectManifest() {
-  const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-    <rect width="192" height="192" rx="32" fill="#1a1a2e"/>
-    <text x="96" y="130" font-size="100" text-anchor="middle" font-family="system-ui">📋</text>
-  </svg>`;
-  const iconBlob    = new Blob([icon], {type:'image/svg+xml'});
-  const iconUrl     = URL.createObjectURL(iconBlob);
   const manifest    = {
     name:             'Arora POD',
     short_name:       'Arora POD',
     description:      'Proof of Delivery System — Arora Enterprises',
-    start_url:        window.location.href,
+    start_url:        '/arora-pod/',
+    scope:            '/arora-pod/',
     display:          'standalone',
     background_color: '#1a1a2e',
     theme_color:      '#1a1a2e',
     orientation:      'portrait',
     icons: [
-      {src: iconUrl, sizes: '192x192', type: 'image/svg+xml', purpose: 'any maskable'},
-      {src: iconUrl, sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable'},
+      {src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAB6klEQVR4nO3SQQ0AIBDAMHScCPzLwwN7EJImFbDH1syGa+t5AV8zEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiIxEAkBiIxEImBSAxEYiASA5EYiMRAJAYiMRCJgUgMRGIgEgORGIjEQCQGIjEQiYFIDERiIBIDkRiI5AB8MyM6lOR/wwAAAABJRU5ErkJggg==', sizes: '192x192', type: 'image/png', purpose: 'any maskable'},
+      {src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAIAAAB7GkOtAAAHH0lEQVR4nO3VMQ0AMAzAsOIoiPGHNxg9YskA8mV2HwBBc14AwAkDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgCgDAIgyAIAoAwCIMgCAKAMAiDIAgKgPCwUW+V97JsEAAAAASUVORK5CYII=', sizes: '512x512', type: 'image/png', purpose: 'any maskable'},
     ]
   };
   const manifestBlob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
@@ -3329,41 +3337,20 @@ async function doDeflag(firm, financialYear, serial) {
   if (link) link.href = manifestUrl;
 })();
 
-// 2. Register a minimal service worker via blob URL
-// The SW caches the app shell so it works offline and satisfies
-// Chrome's PWA installability criteria
+// 2. Register service worker from same-origin sw.js file
+// (blob URL workers fail Chrome's PWA installability check — must be same-origin)
 (function registerSW() {
   if (!('serviceWorker' in navigator)) return;
-  const swCode = `
-const CACHE = 'arora-pod-v1';
-self.addEventListener('install',  e => { self.skipWaiting(); });
-self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
-self.addEventListener('fetch', e => {
-  // Only cache same-origin requests
-  if (!e.request.url.startsWith(self.location.origin)) return;
-  e.respondWith(
-    caches.open(CACHE).then(cache =>
-      cache.match(e.request).then(cached => {
-        const fresh = fetch(e.request).then(res => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            cache.put(e.request, res.clone());
-          }
-          return res;
-        }).catch(() => cached);
-        return cached || fresh;
-      })
-    )
-  );
-});`;
-  const swBlob = new Blob([swCode], {type: 'application/javascript'});
-  const swUrl  = URL.createObjectURL(swBlob);
-  navigator.serviceWorker.register(swUrl, {scope: '/'})
-    .catch(() => {
-      // Scope error is common when file is served from non-root path.
-      // Try registering with the page's own scope.
-      navigator.serviceWorker.register(swUrl)
-        .catch(() => {}); // silently fail — app works without SW
-    });
+  // GitHub Pages serves from /arora-pod/ subpath
+  // SW must be at same path level and scope must match
+  const swPath = (location.pathname.startsWith('/arora-pod/'))
+    ? '/arora-pod/sw.js'
+    : './sw.js';
+  const swScope = (location.pathname.startsWith('/arora-pod/'))
+    ? '/arora-pod/'
+    : './';
+  navigator.serviceWorker.register(swPath, {scope: swScope})
+    .catch(err => console.log('SW registration failed:', err)); // log but don't crash
 })();
 
 // 3. Capture the Chrome install prompt and show our banner
