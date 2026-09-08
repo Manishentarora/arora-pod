@@ -2809,85 +2809,87 @@ function renderCourierEntry() {
     const mode = cs.mode;
     const firmName = (pod.firm||'Firm 1') === 'Firm 2'
       ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
-    const docketLabel = mode === 'Transport' ? 'LR No.'
-                      : mode === 'Porter'    ? 'Booking ID' : 'Docket/AWB';
     const expLine = pod.expectedDate
       ? new Date(pod.expectedDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
       : '';
 
-    const waText = \`Dear \${pod.customer||'Customer'},
+    const waText = 'Dear ' + (pod.customer||'Customer') + ',\n\n' +
+      'Your order from ' + firmName + ' has been dispatched via ' + mode + '.\n\n' +
+      'Invoice No.: ' + (pod.invoice||'—') + '\n' +
+      'Slip attached — refer to the document for tracking details.\n' +
+      (expLine ? 'Expected delivery: ' + expLine + '\n' : '') + '\n' +
+      'Please ensure someone is available to receive and sign.\n' +
+      'Inspect goods before signing.\n\n' +
+      'Contact: ' + S.user.name + ' | ' + firmName;
 
-Your order from \${firmName} has been dispatched via \${mode}.
+    const hasMobile = !!(pod.mobile);
+    const hasEmail  = !!(pod.email);
 
-Invoice No.: \${pod.invoice||'—'}
-Slip attached — refer to the document for tracking details.
-\${expLine?'Expected delivery: '+expLine:''}
+    const summaryRows = [
+      ['Invoice',  pod.invoice   || '—'],
+      ['Customer', pod.customer  || '—'],
+      ['Mode',     mode],
+      ['Mobile',   pod.mobile    || '—'],
+      ['Email',    pod.email     || '—'],
+      pod.expectedDate ? ['Delivery', expLine] : null,
+    ].filter(Boolean).map(([label, val]) =>
+      '<div class="extracted-field"><span class="ef-label">' + escHtml(label) +
+      '</span><span class="ef-val">' + escHtml(val) + '</span></div>'
+    ).join('');
 
-Please ensure someone is available to receive and sign.
-Inspect goods before signing.
-
-Contact: \${S.user.name} | \${firmName}\`;
-
-    c.innerHTML = stepBar + \`
-      <div class="section-hd">Review before sending</div>
-
-      <div class="card" style="padding:0.75rem 1rem;margin-bottom:0.75rem">
-        <div class="extracted-field"><span class="ef-label">Invoice</span><span class="ef-val">\${escHtml(pod.invoice||'—')}</span></div>
-        <div class="extracted-field"><span class="ef-label">Customer</span><span class="ef-val">\${escHtml(pod.customer||'—')}</span></div>
-        <div class="extracted-field"><span class="ef-label">Mode</span><span class="ef-val">\${escHtml(mode)}</span></div>
-        <div class="extracted-field"><span class="ef-label">Mobile</span><span class="ef-val">\${escHtml(pod.mobile||'—')}</span></div>
-        <div class="extracted-field"><span class="ef-label">Email</span><span class="ef-val">\${escHtml(pod.email||'—')}</span></div>
-        \${pod.expectedDate?'<div class="extracted-field"><span class="ef-label">Delivery</span><span class="ef-val">'+escHtml(expLine)+'</span></div>':''}
-      </div>
-
-      <div class="card" style="margin-bottom:0.75rem">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">WHATSAPP MESSAGE PREVIEW</div>
-        <div id="wa-preview-courier" style="font-size:12px;white-space:pre-line;color:var(--text);background:var(--surface2);padding:0.75rem;border-radius:8px">\${escHtml(waText)}</div>
-      </div>
-
-      <div class="section-hd">Send to customer</div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">
-        \${pod.mobile ? \`<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA('customer')">📱 WhatsApp → \${escHtml(pod.mobile)}</button>\` : '<div style="font-size:12px;color:var(--text3)">⚠ No customer mobile saved</div>'}
-        \${pod.email  ? \`<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → \${escHtml(pod.email)}</button>\` : '<div style="font-size:12px;color:var(--text3)">⚠ No customer email saved</div>'}
-      </div>
-
-      <div class="section-hd">Send copy to company</div>
-      <div style="display:flex;gap:8px;margin-bottom:1.5rem">
-        <button class="wa-btn" style="flex:1;font-size:13px" onclick="sendCourierWA('company')">📱 WhatsApp → Company</button>
-        <button class="btn btn-outline" style="flex:1;font-size:13px" onclick="copyText('wa-preview-courier')">📋 Copy text</button>
-      </div>
-
-      <button class="btn btn-outline" style="width:100%;margin-bottom:0.5rem" onclick="courierDone()">✓ Done — back to queue</button>
-      <button class="btn btn-outline" style="width:100%;font-size:12px;color:var(--text3)" onclick="resetCourierSession()">Start new entry</button>
-    \`;
+    c.innerHTML =
+      stepBar +
+      '<div class="section-hd">Review before sending</div>' +
+      '<div class="card" style="padding:0.75rem 1rem;margin-bottom:0.75rem">' + summaryRows + '</div>' +
+      '<div class="card" style="margin-bottom:0.75rem">' +
+        '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">WHATSAPP MESSAGE PREVIEW</div>' +
+        '<div id="wa-preview-courier" style="font-size:12px;white-space:pre-line;color:var(--text);background:var(--surface2);padding:0.75rem;border-radius:8px">' +
+          escHtml(waText) +
+        '</div>' +
+      '</div>' +
+      '<div class="section-hd">Send to customer</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">' +
+        (hasMobile
+          ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(\'customer\')">📱 WhatsApp → ' + escHtml(pod.mobile) + '</button>'
+          : '<div style="font-size:12px;color:var(--text3)">⚠ No customer mobile saved</div>') +
+        (hasEmail
+          ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(pod.email) + '</button>'
+          : '<div style="font-size:12px;color:var(--text3)">⚠ No customer email saved</div>') +
+      '</div>' +
+      '<div class="section-hd">Send copy to company</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:1.5rem">' +
+        '<button class="wa-btn" style="flex:1;font-size:13px" onclick="sendCourierWA(\'company\')">📱 WhatsApp → Company</button>' +
+        '<button class="btn btn-outline" style="flex:1;font-size:13px" onclick="copyText(\'wa-preview-courier\')">📋 Copy text</button>' +
+      '</div>' +
+      '<button class="btn btn-outline" style="width:100%;margin-bottom:0.5rem" onclick="courierDone()">✓ Done — back to queue</button>' +
+      '<button class="btn btn-outline" style="width:100%;font-size:12px;color:var(--text3)" onclick="resetCourierSession()">Start new entry</button>';
     return;
   }
 }
 
+// Courier flow helper functions
 function setCourierMode(mode) {
-  if (!S.courierSession) S.courierSession = {};
+  if (!S.courierSession) S.courierSession = {step:1};
   S.courierSession.mode = mode;
   renderCourierEntry();
 }
+function courierNextStep() { S.courierSession.step++; renderCourierEntry(); }
+function courierPrevStep() { S.courierSession.step = Math.max(1, S.courierSession.step-1); renderCourierEntry(); }
+function resetCourierSession() { S.courierSession = null; renderCourierEntry(); }
+function courierDone() { S.courierSession = null; showScreen('dispatch-queue'); }
 
-function courierNextStep() {
-  S.courierSession.step++;
-  renderCourierEntry();
-}
-
-function courierPrevStep() {
-  S.courierSession.step = Math.max(1, S.courierSession.step - 1);
-  renderCourierEntry();
-}
-
-function resetCourierSession() {
-  S.courierSession = null;
-  renderCourierEntry();
-}
-
-function courierDone() {
-  S.courierSession = null;
-  showScreen('dispatch-queue');
+function handleSlipFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    S.courierSession.slipFile = {
+      dataUrl: e.target.result, mimeType: file.type,
+      name: file.name, isPdf: file.type === 'application/pdf',
+    };
+    renderCourierEntry();
+  };
+  reader.readAsDataURL(file);
 }
 
 async function handleCourierInvoicePhoto(event) {
@@ -2897,139 +2899,82 @@ async function handleCourierInvoicePhoto(event) {
   reader.onload = async (e) => {
     const dataUrl = await compressPhoto(e.target.result, 1200, 0.70);
     S.courierSession.invoiceDataUrl = dataUrl;
-    renderCourierEntry(); // re-render to show preview
-
-    // Submit to backend as a POD — OCR runs, populates invoice/customer/firm
-    if (hasBackend()) {
-      const id = generateId();
-      const photoBase64   = dataUrl.split(',')[1];
-      const photoMimeType = dataUrl.split(';')[0].split(':')[1];
-      showToast('Reading invoice...');
-      const res = await sheetPost({
-        action: 'submitPOD',
-        id, submittedAt: new Date().toISOString(),
-        driverName: S.user.name, driverMobile: S.user.mobile || '',
-        firm: S.user.firm || 'Firm 1',
-        invoiceNo: '', customer: '', mobile: '', email: '',
-        mode: S.courierSession.mode,
-        dispatchDate: new Date().toISOString().slice(0,10),
-        expectedDate: new Date().toISOString().slice(0,10),
-        docket: '', aiConfidence: 'processing',
-        photoBase64, photoMimeType,
-      });
-
-      // Wait for OCR then fetch the enriched pod back
-      setTimeout(async () => {
-        if (hasBackend()) {
-          try {
-            const firmParam = encodeURIComponent(S.user.firm || 'Firm 1');
-            const resp = await fetchWithTimeout(
-              S.backendUrl + '?action=fetchPODs&firm=' + firmParam, {method:'GET',redirect:'follow'}, 15000
-            );
-            const data = JSON.parse(await resp.text());
-            if (data.success && data.pods) {
-              const found = data.pods.find(p => p.id === id);
-              if (found) {
-                S.courierSession.pod = found;
-                renderCourierEntry();
-              }
-            }
-          } catch(e) {}
-        }
-      }, 8000); // wait 8s for OCR to complete
-
-      // Set pod immediately with id so we can track it
-      if (!S.courierSession.pod) {
-        S.courierSession.pod = {
-          id, firm: S.user.firm || 'Firm 1',
-          invoice: '', customer: '', mobile: '', email: '',
-          mode: S.courierSession.mode,
-          dispatchDate: new Date().toISOString().slice(0,10),
-          expectedDate: new Date().toISOString().slice(0,10),
-        };
-      }
-    }
-  };
-  reader.readAsDataURL(file);
-}
-
-function handleSlipFile(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const isPdf = file.type === 'application/pdf';
-    S.courierSession.slipFile = {
-      dataUrl:  e.target.result,
-      mimeType: file.type,
-      name:     file.name,
-      isPdf,
-    };
     renderCourierEntry();
+    if (!hasBackend()) return;
+    const id = generateId();
+    if (!S.courierSession.pod) S.courierSession.pod = {id, firm: S.user.firm||'Firm 1',
+      invoice:'', customer:'', mobile:'', email:'', mode: S.courierSession.mode,
+      dispatchDate: new Date().toISOString().slice(0,10),
+      expectedDate: new Date().toISOString().slice(0,10)};
+    const photoBase64 = dataUrl.split(',')[1];
+    const photoMimeType = dataUrl.split(';')[0].split(':')[1];
+    showToast('Reading invoice...');
+    sheetPost({
+      action:'submitPOD', id, submittedAt: new Date().toISOString(),
+      driverName: S.user.name, driverMobile: S.user.mobile||'',
+      firm: S.user.firm||'Firm 1', invoiceNo:'', customer:'', mobile:'', email:'',
+      mode: S.courierSession.mode,
+      dispatchDate: new Date().toISOString().slice(0,10),
+      expectedDate: new Date().toISOString().slice(0,10),
+      docket:'', aiConfidence:'processing', photoBase64, photoMimeType,
+    });
+    // Fetch enriched pod after OCR (8 second delay)
+    setTimeout(async () => {
+      try {
+        const firmParam = encodeURIComponent(S.user.firm||'Firm 1');
+        const resp = await fetchWithTimeout(
+          S.backendUrl+'?action=fetchPODs&firm='+firmParam, {method:'GET',redirect:'follow'}, 15000);
+        const data = JSON.parse(await resp.text());
+        if (data.success && data.pods) {
+          const found = data.pods.find(p => p.id === id);
+          if (found) { S.courierSession.pod = found; renderCourierEntry(); }
+        }
+      } catch(e) {}
+    }, 8000);
   };
   reader.readAsDataURL(file);
 }
 
 function courierGoToReview() {
-  const mobile = (document.getElementById('cs-mobile')?.value || '').trim();
-  const email  = (document.getElementById('cs-email')?.value  || '').trim();
-  const date   = (document.getElementById('cs-date')?.value   || '');
+  const mobile = (document.getElementById('cs-mobile')?.value||'').trim();
+  const email  = (document.getElementById('cs-email')?.value ||'').trim();
+  const date   = (document.getElementById('cs-date')?.value  ||'');
   if (!mobile && !email) { showToast('Please enter at least a mobile number or email'); return; }
-
   if (!S.courierSession.pod) S.courierSession.pod = {};
-  S.courierSession.pod.mobile      = mobile;
-  S.courierSession.pod.email       = email;
+  S.courierSession.pod.mobile = mobile;
+  S.courierSession.pod.email  = email;
   S.courierSession.pod.expectedDate = date;
-
-  // Save contact to address book if new or updated
-  if (mobile || email) {
-    const pod = S.courierSession.pod;
-    if (hasBackend()) {
-      sheetPost({
-        action: 'updatePodDetails',
-        id: pod.id || '',
-        mobile, email,
-        customer: pod.customer || '',
-        updatedBy: S.user.name,
-      });
-    }
+  if ((mobile || email) && hasBackend()) {
+    sheetPost({action:'updatePodDetails', id: S.courierSession.pod.id||'',
+      mobile, email, customer: S.courierSession.pod.customer||'', updatedBy: S.user.name});
   }
-
   S.courierSession.step = 5;
   renderCourierEntry();
 }
 
 function sendCourierWA(target) {
-  const text = document.getElementById('wa-preview-courier')?.textContent || '';
-  if (target === 'company') {
-    openWhatsAppCompany(text);
-  } else {
-    const mobile = S.courierSession?.pod?.mobile || '';
+  const el = document.getElementById('wa-preview-courier');
+  const text = el ? el.textContent : '';
+  if (target === 'company') { openWhatsAppCompany(text); }
+  else {
+    const mobile = S.courierSession?.pod?.mobile||'';
     if (!mobile) { showToast('No customer mobile number'); return; }
     openWhatsApp(mobile, text);
   }
 }
 
 async function sendCourierEmail() {
-  const pod  = S.courierSession?.pod || {};
+  const pod  = S.courierSession?.pod||{};
   const slip = S.courierSession?.slipFile;
   if (!pod.email) { showToast('No customer email address'); return; }
   if (!confirm('Send email to ' + pod.email + '?')) return;
-
   if (!hasBackend()) { showToast('No backend connected'); return; }
-
   const res = await sheetPost({
-    action: 'sendAlert',
-    podId:         pod.id  || '',
-    firm:          pod.firm || 'Firm 1',
-    invoiceNo:     pod.invoice || '',
-    customer:      pod.customer || '',
-    mobile:        pod.mobile  || '',
-    email:         pod.email,
-    mode:          S.courierSession.mode,
-    docket:        '',
-    expectedDate:  pod.expectedDate || '',
-    sentBy:        S.user.name,
+    action:'sendAlert', podId: pod.id||'', firm: pod.firm||'Firm 1',
+    invoiceNo: pod.invoice||'', customer: pod.customer||'',
+    mobile: pod.mobile||'', email: pod.email,
+    mode: S.courierSession.mode, docket:'',
+    expectedDate: pod.expectedDate||'', sentBy: S.user.name,
     invoiceDocBase64: S.courierSession.invoiceDataUrl
       ? S.courierSession.invoiceDataUrl.split(',')[1] : '',
     invoiceDocMime: S.courierSession.invoiceDataUrl
@@ -3037,14 +2982,7 @@ async function sendCourierEmail() {
     slipDocBase64: slip ? slip.dataUrl.split(',')[1] : '',
     slipDocMime:   slip ? slip.mimeType : 'image/jpeg',
   });
-
-  if (res && res.success) {
-    showToast('Email sent ✓');
-    // Update review screen badge
-    renderCourierEntry();
-  } else {
-    showToast('Email failed — check connection');
-  }
+  showToast(res && res.success ? 'Email sent ✓' : 'Email failed — check connection');
 }
 
 // Legacy helpers kept for any remaining references
