@@ -572,7 +572,6 @@ const S = {
   isLoading: false,
   sheetLoaded: false,  // true once first Sheet fetch completes (even if 0 pods)
   lastSyncTime: null,   // timestamp of last successful Sheet sync
-  isLoading: false,
   backendUrl: BACKEND_URL,
   syncStatus: 'idle', // idle | syncing | error | ok
 };
@@ -1716,8 +1715,9 @@ async function renderContacts() {
     return;
   }
 
-  const rows = customers.map(cu => `
-    <div class="pod-item" style="cursor:pointer" onclick="editContact(${JSON.stringify(cu).replace(/"/g,'&quot;')})">
+  S._contactsCache = customers; // cache for editContactByIdx
+  const rows = customers.map((cu, idx) => `
+    <div class="pod-item" style="cursor:pointer" onclick="editContactByIdx(${customers.indexOf(cu)})" data-idx="${customers.indexOf(cu)}">>
       <div class="pod-icon fleet" style="background:var(--info-soft);color:var(--info-text);font-size:1.4rem">👤</div>
       <div class="pod-meta" style="flex:1">
         <div class="pod-inv">${escHtml(cu.name||'—')}</div>
@@ -1737,6 +1737,11 @@ async function renderContacts() {
     </div>
     <div class="card" style="padding:0">${rows}</div>
   `;
+}
+
+function editContactByIdx(idx) {
+  const cu = S._contactsCache && S._contactsCache[idx];
+  if (cu) editContact(cu);
 }
 
 function editContact(cu) {
@@ -2332,10 +2337,10 @@ function openReviewModal(podId) {
   S.reviewingId = podId;
 
   reviewState = {
-    stamp: pod.dispatchReview?.stamp ?? null,
-    signature: pod.dispatchReview?.signature ?? null,
-    mobile: pod.dispatchReview?.mobile ?? null,
-    name: pod.dispatchReview?.name ?? null,
+    stamp: (pod.dispatchReview ? pod.dispatchReview.stamp : null) || null,
+    signature: (pod.dispatchReview ? pod.dispatchReview.signature : null) || null,
+    mobile: (pod.dispatchReview ? pod.dispatchReview.mobile : null) || null,
+    name: (pod.dispatchReview ? pod.dispatchReview.name : null) || null,
   };
 
   renderReviewModal(pod);
@@ -2392,22 +2397,32 @@ function renderReviewModal(pod) {
     </div>` : ''}
     <div class="section-hd">Invoice details — tap Edit to correct</div>
     <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem">
-      <div class="extracted-field"><span class="ef-label">Invoice</span><span class="ef-val">${escHtml(pod.invoice||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','invoiceNo','Invoice number',${JSON.stringify(pod.invoice||'')})">Edit</span></div>
-      <div class="extracted-field"><span class="ef-label">Invoice date</span><span class="ef-val">${escHtml(pod.dispatchDate||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','dispatchDate','Invoice date (YYYY-MM-DD)',${JSON.stringify(pod.dispatchDate||'')})">Edit</span></div>
-      <div class="extracted-field"><span class="ef-label">Customer</span><span class="ef-val">${escHtml(pod.customer||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','customer','Customer name',${JSON.stringify(pod.customer||'')})">Edit</span></div>
+      <div class="extracted-field">
+        <span class="ef-label">Invoice</span>
+        <span class="ef-val">${escHtml(pod.invoice||'—')}</span>
+        <span class="ef-edit" onclick="startEditField('${pod.id}','invoiceNo','Invoice number')">Edit</span>
+      </div>
+      <div class="extracted-field">
+        <span class="ef-label">Invoice date</span>
+        <span class="ef-val">${escHtml(pod.dispatchDate||'—')}</span>
+        <span class="ef-edit" onclick="startEditField('${pod.id}','dispatchDate','Invoice date')">Edit</span>
+      </div>
+      <div class="extracted-field">
+        <span class="ef-label">Customer</span>
+        <span class="ef-val">${escHtml(pod.customer||'—')}</span>
+        <span class="ef-edit" onclick="startEditField('${pod.id}','customer','Customer name')">Edit</span>
+      </div>
       <div class="extracted-field">
         <span class="ef-label">Mobile</span>
-        <span class="ef-val">${escHtml(pod.mobile||'—')} ${pod.mobile?'<span style="font-size:10px;color:var(--ok);font-weight:600">📒</span>':''}</span>
-        <span class="ef-edit" onclick="editPodField('${pod.id}','mobile','Customer WhatsApp number',${JSON.stringify(pod.mobile||'')})">Edit</span>
+        <span class="ef-val">${escHtml(pod.mobile||'—')}${pod.mobile?' 📒':''}</span>
+        <span class="ef-edit" onclick="startEditField('${pod.id}','mobile','Customer WhatsApp number')">Edit</span>
       </div>
       <div class="extracted-field">
         <span class="ef-label">Email</span>
-        <span class="ef-val">${escHtml(pod.email||'—')} ${pod.email?'<span style="font-size:10px;color:var(--ok);font-weight:600">📒</span>':''}</span>
-        <span class="ef-edit" onclick="editPodField('${pod.id}','email','Customer email address',${JSON.stringify(pod.email||'')})">Edit</span>
+        <span class="ef-val">${escHtml(pod.email||'—')}${pod.email?' 📒':''}</span>
+        <span class="ef-edit" onclick="startEditField('${pod.id}','email','Customer email address')">Edit</span>
       </div>
-      ${pod.mode !== 'Own Fleet' && pod.mode !== 'Self Pick-up' ? `
-      <div class="extracted-field"><span class="ef-label">Docket/LR</span><span class="ef-val">${escHtml(pod.docket||'—')}</span><span class="ef-edit" onclick="editPodField('${pod.id}','docket','Docket / LR / Booking number',${JSON.stringify(pod.docket||'')})">Edit</span></div>` : ''}
-      ${pod.docket ? `<div class="extracted-field"><span class="ef-label">Docket/LR</span><span class="ef-val">${escHtml(pod.docket)}</span></div>` : ''}
+      ${pod.docket ? '<div class="extracted-field"><span class="ef-label">Docket/LR</span><span class="ef-val">' + escHtml(pod.docket) + '</span></div>' : ''}
     </div>
 
     <div class="section-hd">Dispatch checks — look at the photo above</div>
@@ -2593,6 +2608,19 @@ function deleteReviewPhoto(podId) {
 // mainly for handwritten details (like the mobile number near the signature)
 // that OCR cannot reliably read. Reuses the existing updatePodDetails backend
 // action, same one the Unclear queue's manual-entry screen already uses.
+// startEditField — safe alternative to passing values through onclick HTML attributes.
+// Reads the current value from state (S.pods) rather than embedding it in the
+// HTML attribute, which breaks when the value contains quotes or special chars.
+function startEditField(podId, fieldKey, label) {
+  const pod = S.pods.find(p => p.id === podId);
+  if (!pod) return;
+  const fieldMap = {invoiceNo:'invoice', customer:'customer', mobile:'mobile',
+                    email:'email', docket:'docket', dispatchDate:'dispatchDate'};
+  const localKey = fieldMap[fieldKey] || fieldKey;
+  const currentValue = pod[localKey] || '';
+  editPodField(podId, fieldKey, label, currentValue);
+}
+
 function editPodField(podId, fieldKey, label, currentValue) {
   const pod = S.pods.find(p => p.id === podId);
   if (!pod) return;
@@ -2762,7 +2790,22 @@ function renderCourierEntry() {
   // ── STEP 4 — Customer contact ─────────────────────────────────────────────
   if (cs.step === 4) {
     const pod = cs.pod || {};
-    const isKnown = !!(pod.mobile || pod.email); // auto-populated from address book
+
+    // Address book lookup — if OCR populated the customer name but mobile/email
+    // hasn't come back yet (8s delay), try the local pods cache for a match
+    if (!pod.mobile && !pod.email && pod.customer) {
+      const existing = S.pods.find(p =>
+        p.id !== pod.id &&
+        p.customer && p.customer.toLowerCase().trim() === pod.customer.toLowerCase().trim() &&
+        (p.mobile || p.email)
+      );
+      if (existing) {
+        pod.mobile = pod.mobile || existing.mobile || '';
+        pod.email  = pod.email  || existing.email  || '';
+      }
+    }
+
+    const isKnown = !!(pod.mobile || pod.email);
     c.innerHTML = stepBar + `
       <div class="card">
         <div class="card-title">Step 4 — Customer contact details</div>
@@ -2936,9 +2979,9 @@ async function handleCourierInvoicePhoto(event) {
 }
 
 function courierGoToReview() {
-  const mobile = (document.getElementById('cs-mobile')?.value||'').trim();
-  const email  = (document.getElementById('cs-email')?.value ||'').trim();
-  const date   = (document.getElementById('cs-date')?.value  ||'');
+  const mobile = ((document.getElementById('cs-mobile') ? document.getElementById('cs-mobile').value : '')||'').trim();
+  const email  = ((document.getElementById('cs-email') ? document.getElementById('cs-email').value : '') ||'').trim();
+  const date   = ((document.getElementById('cs-date') ? document.getElementById('cs-date').value : '')  ||'');
   if (!mobile && !email) { showToast('Please enter at least a mobile number or email'); return; }
   if (!S.courierSession.pod) S.courierSession.pod = {};
   S.courierSession.pod.mobile = mobile;
@@ -2957,15 +3000,15 @@ function sendCourierWA(target) {
   const text = el ? el.textContent : '';
   if (target === 'company') { openWhatsAppCompany(text); }
   else {
-    const mobile = S.courierSession?.pod?.mobile||'';
+    const mobile = (S.courierSession && S.courierSession.pod && S.courierSession.pod.mobile)||'';
     if (!mobile) { showToast('No customer mobile number'); return; }
     openWhatsApp(mobile, text);
   }
 }
 
 async function sendCourierEmail() {
-  const pod  = S.courierSession?.pod||{};
-  const slip = S.courierSession?.slipFile;
+  const pod  = (S.courierSession && S.courierSession.pod)||{};
+  const slip = (S.courierSession && S.courierSession.slipFile);
   if (!pod.email) { showToast('No customer email address'); return; }
   if (!confirm('Send email to ' + pod.email + '?')) return;
   if (!hasBackend()) { showToast('No backend connected'); return; }
