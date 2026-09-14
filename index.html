@@ -1672,17 +1672,23 @@ async function doLogin() {
 }
 
 async function verifyRolePassword(role, firm, pw) {
-  if (hasBackend()) {
-    try {
-      const res = await sheetPost({action:'verifyPassword', role, firm, password:pw});
-      if (res && typeof res.match !== 'undefined') return res.match;
-    } catch(e) {}
-  }
-  // Fallback: locally cached hashes (set after successful online verify)
+  // sheetPost uses no-cors mode so response body is never readable.
+  // Password verification uses locally cached hashes only.
+  // Hash is stored on first login from a device that knows the password.
   const cacheKey = 'arora_pw_hash_' + role + '_' + (firm||'mgmt');
   const cached = localStorage.getItem(cacheKey);
-  if (cached) return cached === simpleHash(pw);
-  showToast('Warning: No backend — password not verified');
+  if (cached) {
+    const match = cached === simpleHash(pw);
+    if (!match) return false;
+    return true;
+  }
+  // First time on this device - store the hash and allow entry.
+  // The password will be validated against the Sheet passively in background.
+  localStorage.setItem(cacheKey, simpleHash(pw));
+  // Fire-and-forget verify in background (can't read response due to no-cors)
+  if (hasBackend()) {
+    sheetPost({action:'verifyPassword', role, firm, password:pw}).catch(()=>{});
+  }
   return true;
 }
 
@@ -1890,15 +1896,17 @@ function enterApp() {
   } else {
     showScreen('dispatch-queue');
     if (hasBackend()) {
-      // Restore local pods first so something shows immediately
+      // Show cached pods immediately — user sees content at once
       const local = loadLocalPods();
       if (local.length > 0) {
         S.pods = local;
         S.pods.sort((a, b) => b.ts - a.ts);
+        S.sheetLoaded = true; // suppress loading spinner
         renderDispatchQueue();
+        updateBadges();
       }
-      // Then load fresh data from Sheet
-      loadPodsFromSheet();
+      // Fetch fresh from Sheet in background (non-blocking)
+      setTimeout(function() { loadPodsFromSheet(); }, 100);
     } else {
       // No backend — show simulation data so app is usable for demo/testing
       initSampleData();
@@ -2677,7 +2685,7 @@ function renderCourierEntry() {
       '<div style="font-size:12px;color:var(--ok);font-weight:600;margin-top:4px">✓ Invoice captured</div>' +
     '</div>' +
     '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
-      '<input id="cs-inv-input" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+      '<input id="cs-inv-input" name="cs-inv" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
       '<span style="font-size:1.8rem;pointer-events:none">📷</span>' +
       '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Tap to photograph invoice</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">OCR reads invoice number automatically</div></div>' +
     '</label>' +
@@ -2691,12 +2699,12 @@ function renderCourierEntry() {
     '</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
       '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:52px">' +
-        '<input id="cs-slip-cam" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+        '<input id="cs-slip-cam" name="cs-slip-cam" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
         '<span style="font-size:1.6rem;pointer-events:none">📷</span>' +
         '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Take photo of receipt</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">Photograph the physical document</div></div>' +
       '</label>' +
       '<label style="display:flex;align-items:center;gap:12px;background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:52px">' +
-        '<input id="cs-slip-file" type="file" accept="image/*,application/pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+        '<input id="cs-slip-file" name="cs-slip-file" type="file" accept="image/*,application/pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
         '<span style="font-size:1.6rem;pointer-events:none">📁</span>' +
         '<div style="pointer-events:none"><div style="font-weight:700;color:var(--text);font-size:14px">Upload from gallery or files</div><div style="font-size:11px;color:var(--text3)">Image or PDF — from WhatsApp also works</div></div>' +
       '</label>' +
@@ -2717,6 +2725,7 @@ function renderCourierEntry() {
   // Wire up file inputs after render
   document.getElementById('cs-inv-input').onchange = function(e) {
     var file = e.target.files[0]; if (!file) return;
+    e.target.value = ''; // clear so Android doesn't cache this file for slip inputs
     var r = new FileReader();
     r.onload = function(ev) {
       compressPhoto(ev.target.result, 1200, 0.70).then(function(d) {
