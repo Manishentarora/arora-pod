@@ -2657,385 +2657,296 @@ function renderCourierEntry() {
   if (S.user.role === 'management') setNavActive('nav-management', 'nav-mqueue');
   else setNavActive('nav-dispatch', 'nav-courier');
   const c = document.getElementById('main-content');
+  if (!S.cs) S.cs = {mode:'', invoiceData:null, slipData:null};
+  const cs = S.cs;
 
-  // Reset state for a fresh entry
-  if (!S.courierSession) {
-    S.courierSession = {
-      step: 1,          // 1=select mode, 2=invoice photo, 3=slip photo, 4=contact, 5=review+send
-      mode: '',
-      pod: null,        // created after invoice photo processed
-      slipFile: null,   // {dataUrl, mimeType, name, isPdf}
-      invoiceDataUrl: null,
-    };
-  }
-  const cs = S.courierSession;
+  const modeBar = '<div style="margin-bottom:1rem">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">SHIPMENT TYPE</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">' +
+    ['Courier','Porter','Transport'].map(function(m) {
+      var sel = cs.mode === m;
+      return '<button data-mode="' + m + '" onclick="csSetMode(this.dataset.mode)" style="padding:10px 4px;border-radius:10px;border:2px solid ' +
+        (sel ? 'var(--info)' : 'var(--border)') + ';background:' + (sel ? 'var(--info-soft)' : 'var(--surface)') +
+        ';color:' + (sel ? 'var(--info-text)' : 'var(--text)') + ';font-size:12px;font-weight:' + (sel ? '700' : '500') +
+        ';cursor:pointer;font-family:inherit;text-align:center">' +
+        (m==='Courier'?'📦':m==='Porter'?'🛵':'🚛') + '<br/>' + m + '</button>';
+    }).join('') +
+    '</div></div>';
 
-  const steps = ['Mode', 'Invoice', 'Receipt', 'Contact', 'Send'];
-  const stepBar = `<div style="display:flex;gap:0;margin-bottom:1.25rem">
-    ${steps.map((s,i) => `
-      <div style="flex:1;text-align:center;padding:6px 2px;font-size:10px;font-weight:${cs.step===i+1?'800':'500'};
-        color:${cs.step===i+1?'var(--accent)':cs.step>i+1?'var(--ok)':'var(--text3)'};
-        border-bottom:2px solid ${cs.step===i+1?'var(--accent)':cs.step>i+1?'var(--ok)':'var(--border)'}">
-        ${cs.step>i+1?'✓ ':''} ${s}
-      </div>`).join('')}
-  </div>`;
+  var slipLabel = cs.mode === 'Transport' ? 'LR / Consignment note'
+                : cs.mode === 'Porter'    ? 'Porter receipt / booking ID'
+                :                           'Courier docket / AWB slip';
 
-  // ── STEP 1 — Select mode ─────────────────────────────────────────────────
-  if (cs.step === 1) {
-    c.innerHTML = stepBar + `
-      <div class="card">
-        <div class="card-title">What type of shipment?</div>
-        <div class="mode-selector">
-          <div class="mode-opt ${cs.mode==='Courier'?'selected':''}" onclick="setCourierMode('Courier')">
-            <span class="mode-emoji">📦</span>Courier
-          </div>
-          <div class="mode-opt ${cs.mode==='Porter'?'selected':''}" onclick="setCourierMode('Porter')">
-            <span class="mode-emoji">🛵</span>Porter
-          </div>
-          <div class="mode-opt ${cs.mode==='Transport'?'selected':''}" onclick="setCourierMode('Transport')">
-            <span class="mode-emoji">🚛</span>Transport
-          </div>
-        </div>
-        ${cs.mode ? '<button class="btn btn-primary" style="margin-top:1rem;width:100%" onclick="courierNextStep()">Next: Photograph invoice →</button>' : ''}
-      </div>`;
-    return;
-  }
+  var invoiceSection =
+    '<div style="margin-bottom:1.25rem">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">STEP 1 — INVOICE PHOTO</div>' +
+      (cs.invoiceData ?
+        '<div style="position:relative">' +
+          '<img src="' + cs.invoiceData + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:10px;border:2px solid var(--ok)"/>' +
+          '<div style="color:var(--ok);font-weight:600;font-size:12px;margin-top:4px">✓ Invoice captured</div>' +
+          '<button onclick="S.cs.invoiceData=null;renderCourierEntry()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.5);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>' +
+        '</div>'
+      :
+        '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:64px">' +
+          '<input id="cs-inv-input" type="file" accept="image/*" capture="environment" onchange="csHandleInvoice(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+          '<span style="font-size:1.8rem;pointer-events:none">📷</span>' +
+          '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Tap to photograph invoice</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">System reads invoice number and customer automatically</div></div>' +
+        '</label>'
+      ) +
+    '</div>';
 
-  // ── STEP 2 — Invoice photo ────────────────────────────────────────────────
-  if (cs.step === 2) {
-    const hasPhoto = !!cs.invoiceDataUrl;
-    c.innerHTML = stepBar +
-      '<div class="card">' +
-        '<div class="card-title">Step 2 — Photograph the invoice</div>' +
-        '<div style="font-size:13px;color:var(--text3);margin-bottom:1rem">' +
-          'The system will read the invoice number, date, and customer name automatically.' +
-        '</div>' +
-        (hasPhoto ?
-          '<img src="' + cs.invoiceDataUrl + '" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;border:1px solid var(--border);margin-bottom:0.75rem"/>' +
-          '<div style="color:var(--ok);font-weight:600;font-size:13px;margin-bottom:0.75rem">✓ Invoice captured — reading details...</div>'
-        :
-          '<label style="display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-            'background:var(--accent);border-radius:16px;cursor:pointer;padding:2.5rem 1rem;gap:0.75rem;' +
-            'position:relative;overflow:hidden;min-height:200px">' +
-            '<input type="file" accept="image/*" capture="environment" id="courier-invoice-input"' +
-              ' onchange="handleCourierInvoicePhoto(event)"' +
-              ' style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer"/>' +
-            '<span style="font-size:3.5rem;pointer-events:none">📷</span>' +
-            '<span style="font-size:18px;font-weight:800;color:#fff;pointer-events:none">Tap to photograph invoice</span>' +
-            '<span style="font-size:12px;color:rgba(255,255,255,0.8);pointer-events:none">Hold steady — full invoice must be visible</span>' +
-          '</label>'
-        ) +
-        '<div style="display:flex;gap:8px;margin-top:0.75rem">' +
-          '<button class="btn btn-outline" style="flex:1" onclick="courierPrevStep()">← Back</button>' +
-          (hasPhoto ? '<button class="btn btn-primary" style="flex:2" onclick="courierNextStep()">Next: Upload receipt →</button>' : '') +
-        '</div>' +
-      '</div>';
-    return;
-  }
+  var slipSection =
+    '<div style="margin-bottom:1.25rem">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">STEP 2 — ' + slipLabel.toUpperCase() + '</div>' +
+      (cs.slipData ?
+        '<div style="position:relative">' +
+          (cs.slipData.isPdf ?
+            '<div style="background:var(--surface2);border-radius:10px;padding:1rem;display:flex;align-items:center;gap:10px;border:2px solid var(--ok)">' +
+              '<span style="font-size:2rem">📄</span>' +
+              '<div><div style="font-weight:600;font-size:13px">' + escHtml(cs.slipData.name) + '</div><div style="font-size:11px;color:var(--ok)">✓ PDF uploaded</div></div>' +
+            '</div>'
+          :
+            '<img src="' + cs.slipData.dataUrl + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:10px;border:2px solid var(--ok)"/>' +
+            '<div style="color:var(--ok);font-weight:600;font-size:12px;margin-top:4px">✓ Receipt captured</div>'
+          ) +
+          '<button onclick="S.cs.slipData=null;renderCourierEntry()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.5);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>' +
+        '</div>'
+      :
+        '<div style="display:flex;flex-direction:column;gap:8px">' +
+          '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
+            '<input id="cs-slip-cam" type="file" accept="image/*" capture="environment" onchange="csHandleSlip(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+            '<span style="font-size:1.6rem;pointer-events:none">📷</span>' +
+            '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Take photo</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">Photograph the physical ' + (cs.mode==='Transport'?'LR copy':cs.mode==='Porter'?'Porter receipt':'docket slip') + '</div></div>' +
+          '</label>' +
+          '<label style="display:flex;align-items:center;gap:12px;background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
+            '<input id="cs-slip-file" type="file" accept="image/*,application/pdf" onchange="csHandleSlip(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+            '<span style="font-size:1.6rem;pointer-events:none">📁</span>' +
+            '<div style="pointer-events:none"><div style="font-weight:700;color:var(--text);font-size:14px">Upload from gallery / files</div><div style="font-size:11px;color:var(--text3)">Image or PDF — forwarded from WhatsApp also works</div></div>' +
+          '</label>' +
+        '</div>'
+      ) +
+    '</div>';
 
-  // ── STEP 3 — Slip/receipt photo or file ──────────────────────────────────
-  if (cs.step === 3) {
-    const hasSlip = !!cs.slipFile;
-    const slipLabel = cs.mode === 'Transport' ? 'LR / Consignment note'
-                    : cs.mode === 'Porter'    ? 'Porter receipt / booking confirmation'
-                    :                           'Courier docket / AWB slip';
-    const slipHint = cs.mode === 'Transport' ? 'Photograph or upload the LR copy from the transporter'
-                   : cs.mode === 'Porter'    ? 'Photograph or upload the Porter app receipt'
-                   :                           'Photograph or upload the courier booking slip / AWB';
-    c.innerHTML = stepBar + `
-      <div class="card">
-        <div class="card-title">Step 3 — ${slipLabel}</div>
-        <div style="font-size:13px;color:var(--text3);margin-bottom:1rem">${slipHint}</div>
+  var pod = cs.pod || {};
+  var isKnown = !!(pod.mobile || pod.email);
+  var contactSection =
+    '<div style="margin-bottom:1.25rem">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">STEP 3 — CUSTOMER CONTACT</div>' +
+      (isKnown ? '<div style="background:var(--ok-soft);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--ok-text);margin-bottom:8px">📒 Saved contact — details auto-filled</div>' : '') +
+      '<div class="field" style="margin-bottom:8px"><input type="tel" id="cs-mobile" value="' + escHtml(pod.mobile||'') + '" placeholder="Customer WhatsApp number" style="font-size:14px"/></div>' +
+      '<div class="field" style="margin-bottom:8px"><input type="email" id="cs-email" value="' + escHtml(pod.email||'') + '" placeholder="Customer email address" style="font-size:14px"/></div>' +
+      '<div class="field"><input type="date" id="cs-date" value="' + escHtml(pod.expectedDate||'') + '" style="font-size:14px"/></div>' +
+    '</div>';
 
-        ${hasSlip ? (cs.slipFile.isPdf ? `
-          <div style="background:var(--surface2);border-radius:8px;padding:1rem;display:flex;align-items:center;gap:12px;margin-bottom:0.75rem">
-            <span style="font-size:2.5rem">📄</span>
-            <div>
-              <div style="font-weight:600;font-size:13px">${escHtml(cs.slipFile.name)}</div>
-              <div style="font-size:11px;color:var(--ok)">✓ PDF uploaded</div>
-            </div>
-          </div>` : `
-          <img src="${cs.slipFile.dataUrl}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid var(--border);margin-bottom:0.75rem"/>
-          <div style="color:var(--ok);font-weight:600;font-size:13px;margin-bottom:0.75rem">✓ Receipt captured</div>
-        `) : `
-          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:0.75rem">
-            <label style="display:flex;align-items:center;gap:12px;background:var(--accent);
-              border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden">
-              <input type="file" accept="image/*" capture="environment" id="slip-camera-input"
-                onchange="handleSlipFile(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer"/>
-              <span style="font-size:1.8rem">📷</span>
-              <div>
-                <div style="font-weight:700;color:#fff;font-size:14px">Take photo</div>
-                <div style="font-size:11px;color:rgba(255,255,255,0.8)">Photograph the physical slip</div>
-              </div>
-            </label>
-            <label style="display:flex;align-items:center;gap:12px;background:var(--surface2);
-              border:2px dashed var(--border2);border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden">
-              <input type="file" accept="image/*,application/pdf" id="slip-file-input"
-                onchange="handleSlipFile(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer"/>
-              <span style="font-size:1.8rem">📁</span>
-              <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Upload from gallery or files</div>
-                <div style="font-size:11px;color:var(--text3)">Image or PDF — forwarded from WhatsApp also works</div>
-              </div>
-            </label>
-          </div>
-        `}
-        <div style="display:flex;gap:8px;margin-top:0.5rem">
-          <button class="btn btn-outline" style="flex:1" onclick="courierPrevStep()">← Back</button>
-          ${hasSlip ? '<button class="btn btn-primary" style="flex:2" onclick="courierNextStep()">Next: Customer contact →</button>' : ''}
-        </div>
-      </div>`;
-    return;
-  }
+  var canSend = cs.invoiceData && cs.slipData && cs.mode;
+  var sendBtn = canSend ?
+    '<button class="btn btn-primary" style="font-size:15px" onclick="csGoSend()">Preview & Send →</button>' :
+    '<div style="background:var(--surface2);border-radius:10px;padding:0.75rem 1rem;font-size:13px;color:var(--text3);text-align:center">' +
+      (cs.mode ? (cs.invoiceData ? 'Add the ' + slipLabel + ' above to continue' : 'Add invoice photo above to continue') : 'Select shipment type above to start') +
+    '</div>';
 
-  // ── STEP 4 — Customer contact ─────────────────────────────────────────────
-  if (cs.step === 4) {
-    const pod = cs.pod || {};
-
-    // Address book lookup — if OCR populated the customer name but mobile/email
-    // hasn't come back yet (8s delay), try the local pods cache for a match
-    if (!pod.mobile && !pod.email && pod.customer) {
-      const existing = S.pods.find(p =>
-        p.id !== pod.id &&
-        p.customer && p.customer.toLowerCase().trim() === pod.customer.toLowerCase().trim() &&
-        (p.mobile || p.email)
-      );
-      if (existing) {
-        pod.mobile = pod.mobile || existing.mobile || '';
-        pod.email  = pod.email  || existing.email  || '';
-      }
-    }
-
-    const isKnown = !!(pod.mobile || pod.email);
-    c.innerHTML = stepBar + `
-      <div class="card">
-        <div class="card-title">Step 4 — Customer contact details</div>
-
-        ${pod.customer ? `
-        <div style="background:var(--info-soft);border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem">
-          <div style="font-size:11px;color:var(--info-text);font-weight:600;margin-bottom:2px">CUSTOMER (READ BY OCR)</div>
-          <div style="font-weight:700;font-size:14px">${escHtml(pod.customer)}</div>
-          <div style="font-size:12px;color:var(--text3)">${escHtml(pod.invoice||'')} · ${escHtml(cs.mode)}</div>
-        </div>` : ''}
-
-        ${isKnown ? `
-        <div style="background:var(--ok-soft);border-radius:8px;padding:0.6rem 1rem;margin-bottom:0.75rem;font-size:12px;color:var(--ok-text)">
-          <span style="font-weight:700">📒 Saved contact found</span> — details filled automatically
-        </div>` : `
-        <div style="font-size:12px;color:var(--text3);margin-bottom:0.75rem">
-          New customer — please fill in their contact details. Saved for next time.
-        </div>`}
-
-        <div class="field">
-          <label class="label">Customer WhatsApp number ${isKnown?'<span style="color:var(--ok)">📒</span>':''}</label>
-          <input type="tel" id="cs-mobile" value="${escHtml(pod.mobile||'')}" placeholder="10-digit mobile number"/>
-        </div>
-        <div class="field">
-          <label class="label">Customer email ${isKnown?'<span style="color:var(--ok)">📒</span>':''}</label>
-          <input type="email" id="cs-email" value="${escHtml(pod.email||'')}" placeholder="customer@company.com"/>
-        </div>
-        <div class="field">
-          <label class="label">Expected delivery date <span style="color:var(--text3);font-weight:400">(optional)</span></label>
-          <input type="date" id="cs-date" value="${escHtml(pod.expectedDate||'')}"/>
-        </div>
-
-        <div style="display:flex;gap:8px;margin-top:0.5rem">
-          <button class="btn btn-outline" style="flex:1" onclick="courierPrevStep()">← Back</button>
-          <button class="btn btn-primary" style="flex:2" onclick="courierGoToReview()">Preview & Send →</button>
-        </div>
-      </div>`;
-    return;
-  }
-
-  // ── STEP 5 — Review and send ──────────────────────────────────────────────
-  if (cs.step === 5) {
-    const pod = cs.pod || {};
-    const mode = cs.mode;
-    const firmName = (pod.firm||'Firm 1') === 'Firm 2'
-      ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
-    const expLine = pod.expectedDate
-      ? new Date(pod.expectedDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
-      : '';
-
-    const waText = 'Dear ' + (pod.customer||'Customer') + ',\n\n' +
-      'Your order from ' + firmName + ' has been dispatched via ' + mode + '.\n\n' +
-      'Invoice No.: ' + (pod.invoice||'—') + '\n' +
-      'Slip attached — refer to the document for tracking details.\n' +
-      (expLine ? 'Expected delivery: ' + expLine + '\n' : '') + '\n' +
-      'Please ensure someone is available to receive and sign.\n' +
-      'Inspect goods before signing.\n\n' +
-      'Contact: ' + S.user.name + ' | ' + firmName;
-
-    const hasMobile = !!(pod.mobile);
-    const hasEmail  = !!(pod.email);
-
-    const summaryRows = [
-      ['Invoice',  pod.invoice   || '—'],
-      ['Customer', pod.customer  || '—'],
-      ['Mode',     mode],
-      ['Mobile',   pod.mobile    || '—'],
-      ['Email',    pod.email     || '—'],
-      pod.expectedDate ? ['Delivery', expLine] : null,
-    ].filter(Boolean).map(([label, val]) =>
-      '<div class="extracted-field"><span class="ef-label">' + escHtml(label) +
-      '</span><span class="ef-val">' + escHtml(val) + '</span></div>'
-    ).join('');
-
-    c.innerHTML =
-      stepBar +
-      '<div class="section-hd">Review before sending</div>' +
-      '<div class="card" style="padding:0.75rem 1rem;margin-bottom:0.75rem">' + summaryRows + '</div>' +
-      '<div class="card" style="margin-bottom:0.75rem">' +
-        '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">WHATSAPP MESSAGE PREVIEW</div>' +
-        '<div id="wa-preview-courier" style="font-size:12px;white-space:pre-line;color:var(--text);background:var(--surface2);padding:0.75rem;border-radius:8px">' +
-          escHtml(waText) +
-        '</div>' +
-      '</div>' +
-      '<div class="section-hd">Send to customer</div>' +
-      '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">' +
-        (hasMobile
-          ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(\'customer\')">📱 WhatsApp → ' + escHtml(pod.mobile) + '</button>'
-          : '<div style="font-size:12px;color:var(--text3)">⚠ No customer mobile saved</div>') +
-        (hasEmail
-          ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(pod.email) + '</button>'
-          : '<div style="font-size:12px;color:var(--text3)">⚠ No customer email saved</div>') +
-      '</div>' +
-      '<div class="section-hd">Send copy to company</div>' +
-      '<div style="display:flex;gap:8px;margin-bottom:1.5rem">' +
-        '<button class="wa-btn" style="flex:1;font-size:13px" onclick="sendCourierWA(\'company\')">📱 WhatsApp → Company</button>' +
-        '<button class="btn btn-outline" style="flex:1;font-size:13px" onclick="copyText(\'wa-preview-courier\')">📋 Copy text</button>' +
-      '</div>' +
-      '<button class="btn btn-outline" style="width:100%;margin-bottom:0.5rem" onclick="courierDone()">✓ Done — back to queue</button>' +
-      '<button class="btn btn-outline" style="width:100%;font-size:12px;color:var(--text3)" onclick="resetCourierSession()">Start new entry</button>';
-    return;
-  }
+  c.innerHTML = '<div style="padding-bottom:1rem">' + modeBar + invoiceSection + (cs.mode && cs.invoiceData ? slipSection : '') + (cs.mode && cs.invoiceData && cs.slipData ? contactSection : '') + sendBtn + '</div>';
+  // CRITICAL: clear file inputs after render so Android doesn't cache the previous file
+  // and re-fire the same file when the next input is tapped
+  ['cs-inv-input','cs-slip-cam','cs-slip-file'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { try { el.value = ''; } catch(e) {} }
+  });
 }
 
-// Courier flow helper functions
-function setCourierMode(mode) {
-  if (!S.courierSession) S.courierSession = {step:1};
-  S.courierSession.mode = mode;
-  renderCourierEntry();
-}
-function courierNextStep() { S.courierSession.step++; renderCourierEntry(); }
-function courierPrevStep() { S.courierSession.step = Math.max(1, S.courierSession.step-1); renderCourierEntry(); }
-function resetCourierSession() { S.courierSession = null; renderCourierEntry(); }
-function courierDone() { S.courierSession = null; showScreen('dispatch-queue'); }
+function csSetMode(mode) { if (!S.cs) S.cs = {}; S.cs.mode = mode; renderCourierEntry(); }
 
-function handleSlipFile(event) {
-  const file = event.target.files[0];
+function csHandleInvoice(event) {
+  var file = event.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    S.courierSession.slipFile = {
-      dataUrl: e.target.result, mimeType: file.type,
-      name: file.name, isPdf: file.type === 'application/pdf',
-    };
-    renderCourierEntry();
-  };
-  reader.readAsDataURL(file);
-}
-
-async function handleCourierInvoicePhoto(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const dataUrl = await compressPhoto(e.target.result, 1200, 0.70);
-    S.courierSession.invoiceDataUrl = dataUrl;
-    // Auto-advance to Step 3 after 1 second so dispatch sees the photo then moves on
-    setTimeout(() => {
-      if (S.courierSession && S.courierSession.step === 2) {
-        S.courierSession.step = 3;
-        renderCourierEntry();
-      }
-    }, 1200);
-    renderCourierEntry();
-    if (!hasBackend()) return;
-    const id = generateId();
-    if (!S.courierSession.pod) S.courierSession.pod = {id, firm: S.user.firm||'Firm 1',
-      invoice:'', customer:'', mobile:'', email:'', mode: S.courierSession.mode,
-      dispatchDate: new Date().toISOString().slice(0,10),
-      expectedDate: new Date().toISOString().slice(0,10)};
-    const photoBase64 = dataUrl.split(',')[1];
-    const photoMimeType = dataUrl.split(';')[0].split(':')[1];
-    showToast('Reading invoice...');
-    sheetPost({
-      action:'submitPOD', id, submittedAt: new Date().toISOString(),
-      driverName: S.user.name, driverMobile: S.user.mobile||'',
-      firm: S.user.firm||'Firm 1', invoiceNo:'', customer:'', mobile:'', email:'',
-      mode: S.courierSession.mode,
-      dispatchDate: new Date().toISOString().slice(0,10),
-      expectedDate: new Date().toISOString().slice(0,10),
-      docket:'', aiConfidence:'processing', photoBase64, photoMimeType,
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    compressPhoto(e.target.result, 1200, 0.70).then(function(dataUrl) {
+      if (!S.cs) S.cs = {};
+      S.cs.invoiceData = dataUrl;
+      renderCourierEntry();
+      // Submit to backend for OCR
+      if (!hasBackend()) return;
+      var id = generateId();
+      S.cs.pod = {id:id, firm:S.user.firm||'Firm 1', invoice:'', customer:'', mobile:'', email:'',
+        mode:S.cs.mode, dispatchDate:new Date().toISOString().slice(0,10), expectedDate:''};
+      sheetPost({action:'submitPOD', id:id, submittedAt:new Date().toISOString(),
+        driverName:S.user.name, driverMobile:S.user.mobile||'', firm:S.user.firm||'Firm 1',
+        invoiceNo:'', customer:'', mobile:'', email:'', mode:S.cs.mode,
+        dispatchDate:new Date().toISOString().slice(0,10), expectedDate:'',
+        docket:'', aiConfidence:'processing',
+        photoBase64:dataUrl.split(',')[1],
+        photoMimeType:dataUrl.split(';')[0].split(':')[1]});
+      showToast('Invoice uploaded — reading details...');
+      // After OCR delay, fetch back enriched pod
+      setTimeout(function() {
+        if (!S.cs || !S.cs.pod) return;
+        fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
+          {method:'GET',redirect:'follow'}, 15000)
+        .then(function(r) { return r.text(); })
+        .then(function(t) {
+          var data = JSON.parse(t);
+          if (data.success && data.pods) {
+            var found = data.pods.find(function(p) { return p.id === id; });
+            if (found) {
+              S.cs.pod = found;
+              // Check local pods cache for saved contact
+              if (!found.mobile && !found.email && found.customer) {
+                var prev = S.pods.find(function(p) {
+                  return p.id !== found.id && p.customer &&
+                    p.customer.toLowerCase().trim() === found.customer.toLowerCase().trim() &&
+                    (p.mobile || p.email);
+                });
+                if (prev) { S.cs.pod.mobile = prev.mobile||''; S.cs.pod.email = prev.email||''; }
+              }
+              renderCourierEntry();
+            }
+          }
+        }).catch(function(){});
+      }, 8000);
     });
-    // Fetch enriched pod after OCR (8 second delay)
-    setTimeout(async () => {
-      try {
-        const firmParam = encodeURIComponent(S.user.firm||'Firm 1');
-        const resp = await fetchWithTimeout(
-          S.backendUrl+'?action=fetchPODs&firm='+firmParam, {method:'GET',redirect:'follow'}, 15000);
-        const data = JSON.parse(await resp.text());
-        if (data.success && data.pods) {
-          const found = data.pods.find(p => p.id === id);
-          if (found) { S.courierSession.pod = found; renderCourierEntry(); }
-        }
-      } catch(e) {}
-    }, 8000);
   };
   reader.readAsDataURL(file);
 }
 
-function courierGoToReview() {
-  const mobile = ((document.getElementById('cs-mobile') ? document.getElementById('cs-mobile').value : '')||'').trim();
-  const email  = ((document.getElementById('cs-email') ? document.getElementById('cs-email').value : '') ||'').trim();
-  const date   = ((document.getElementById('cs-date') ? document.getElementById('cs-date').value : '')  ||'');
-  if (!mobile && !email) { showToast('Please enter at least a mobile number or email'); return; }
-  if (!S.courierSession.pod) S.courierSession.pod = {};
-  S.courierSession.pod.mobile = mobile;
-  S.courierSession.pod.email  = email;
-  S.courierSession.pod.expectedDate = date;
-  if ((mobile || email) && hasBackend()) {
-    sheetPost({action:'updatePodDetails', id: S.courierSession.pod.id||'',
-      mobile, email, customer: S.courierSession.pod.customer||'', updatedBy: S.user.name});
-  }
-  S.courierSession.step = 5;
-  renderCourierEntry();
+function csHandleSlip(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    if (!S.cs) S.cs = {};
+    S.cs.slipData = {dataUrl:e.target.result, mimeType:file.type, name:file.name, isPdf:file.type==='application/pdf'};
+    renderCourierEntry();
+  };
+  reader.readAsDataURL(file);
 }
+
+function csGoSend() {
+  var mobile = (document.getElementById('cs-mobile')||{}).value||'';
+  var email  = (document.getElementById('cs-email') ||{}).value||'';
+  var date   = (document.getElementById('cs-date')  ||{}).value||'';
+  if (!mobile && !email) { showToast('Please enter customer mobile or email'); return; }
+  if (!S.cs.pod) S.cs.pod = {};
+  S.cs.pod.mobile = mobile.trim();
+  S.cs.pod.email  = email.trim();
+  S.cs.pod.expectedDate = date;
+  if ((mobile||email) && hasBackend()) {
+    sheetPost({action:'updatePodDetails', id:S.cs.pod.id||'', mobile:mobile.trim(),
+      email:email.trim(), customer:S.cs.pod.customer||'', updatedBy:S.user.name});
+  }
+  renderCourierSend();
+}
+
+function renderCourierSend() {
+  var cs = S.cs; var pod = cs.pod || {};
+  var firmName = (pod.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
+  var expLine = pod.expectedDate ? new Date(pod.expectedDate).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '';
+
+  var waLines = [
+    'Dear ' + (pod.customer || 'Customer') + ',',
+    '',
+    'Your order from ' + firmName + ' has been dispatched via ' + cs.mode + '.',
+    '',
+    'Invoice No.: ' + (pod.invoice || '—'),
+    'Please refer to the attached receipt for tracking details.',
+    expLine ? 'Expected delivery: ' + expLine : '',
+    '',
+    'Please ensure someone is available to receive and sign.',
+    '',
+    'Contact: ' + (S.user ? S.user.name : '') + ' | ' + firmName
+  ];
+  var waText = waLines.filter(function(l, i) { return !(l === '' && waLines[i-1] === ''); }).join('\n');
+
+  var fields = [
+    ['Invoice',  pod.invoice  || '—'],
+    ['Customer', pod.customer || '—'],
+    ['Mode',     cs.mode],
+    ['Mobile',   pod.mobile   || '—'],
+    ['Email',    pod.email    || '—']
+  ];
+  if (expLine) fields.push(['Delivery', expLine]);
+
+  var summaryHtml = fields.map(function(f) {
+    return '<div class="extracted-field"><span class="ef-label">' + escHtml(f[0]) + '</span><span class="ef-val">' + escHtml(f[1]) + '</span></div>';
+  }).join('');
+
+  var c = document.getElementById('main-content');
+  c.innerHTML =
+    '<div class="section-hd">Review and send</div>' +
+    '<div class="card" style="padding:0.75rem 1rem;margin-bottom:0.75rem">' + summaryHtml + '</div>' +
+    '<div class="card" style="margin-bottom:0.75rem">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">MESSAGE PREVIEW</div>' +
+      '<div id="wa-preview-courier" style="font-size:12px;white-space:pre-line;background:var(--surface2);padding:0.75rem;border-radius:8px">' + escHtml(waText) + '</div>' +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">' +
+      (pod.mobile ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(\'customer\')">📱 WhatsApp → ' + escHtml(pod.mobile) + '</button>' : '<div style="font-size:12px;color:var(--text3);padding:0.5rem 0">⚠ No customer mobile saved</div>') +
+      (pod.email  ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(pod.email) + '</button>' : '<div style="font-size:12px;color:var(--text3);padding:0.5rem 0">⚠ No customer email saved</div>') +
+      '<button class="wa-btn" style="width:100%;font-size:13px;opacity:0.85" onclick="sendCourierWA(\'company\')">📱 WhatsApp → Company copy</button>' +
+      '<button class="btn btn-outline" style="width:100%;font-size:12px" onclick="copyText(\'wa-preview-courier\')">📋 Copy message text</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px">' +
+      '<button class="btn btn-outline" style="flex:1" onclick="renderCourierEntry()">← Back</button>' +
+      '<button class="btn btn-outline" style="flex:1" onclick="S.cs=null;showScreen(\'dispatch-queue\')">✓ Done</button>' +
+    '</div>';
+}
+
+
+// Keep old function names working
+function setCourierMode(m) { csSetMode(m); }
+function courierNextStep() {}
+function courierPrevStep() {}
+function resetCourierSession() { S.cs=null; renderCourierEntry(); }
+function courierDone() { S.cs=null; showScreen('dispatch-queue'); }
+function handleSlipFile(e) { csHandleSlip(e); }
+function handleCourierInvoicePhoto(e) { csHandleInvoice(e); }
+function courierGoToReview() { csGoSend(); }
 
 function sendCourierWA(target) {
-  const el = document.getElementById('wa-preview-courier');
-  const text = el ? el.textContent : '';
-  if (target === 'company') { openWhatsAppCompany(text); }
-  else {
-    const mobile = (S.courierSession && S.courierSession.pod && S.courierSession.pod.mobile)||'';
+  var el = document.getElementById('wa-preview-courier');
+  var text = el ? el.textContent : '';
+  if (target === 'company') {
+    openWhatsAppCompany(text);
+  } else {
+    var mobile = S.cs && S.cs.pod ? (S.cs.pod.mobile||'') : '';
     if (!mobile) { showToast('No customer mobile number'); return; }
     openWhatsApp(mobile, text);
   }
 }
 
 async function sendCourierEmail() {
-  const pod  = (S.courierSession && S.courierSession.pod)||{};
-  const slip = (S.courierSession && S.courierSession.slipFile);
+  var pod  = S.cs && S.cs.pod ? S.cs.pod : {};
+  var slip = S.cs ? S.cs.slipData : null;
   if (!pod.email) { showToast('No customer email address'); return; }
   if (!confirm('Send email to ' + pod.email + '?')) return;
   if (!hasBackend()) { showToast('No backend connected'); return; }
-  const res = await sheetPost({
-    action:'sendAlert', podId: pod.id||'', firm: pod.firm||'Firm 1',
-    invoiceNo: pod.invoice||'', customer: pod.customer||'',
-    mobile: pod.mobile||'', email: pod.email,
-    mode: S.courierSession.mode, docket:'',
-    expectedDate: pod.expectedDate||'', sentBy: S.user.name,
-    invoiceDocBase64: S.courierSession.invoiceDataUrl
-      ? S.courierSession.invoiceDataUrl.split(',')[1] : '',
-    invoiceDocMime: S.courierSession.invoiceDataUrl
-      ? S.courierSession.invoiceDataUrl.split(';')[0].split(':')[1] : 'image/jpeg',
+  var res = await sheetPost({
+    action:'sendAlert', podId:pod.id||'', firm:pod.firm||'Firm 1',
+    invoiceNo:pod.invoice||'', customer:pod.customer||'',
+    mobile:pod.mobile||'', email:pod.email,
+    mode:S.cs.mode, docket:'', expectedDate:pod.expectedDate||'',
+    sentBy:S.user.name,
+    invoiceDocBase64: S.cs.invoiceData ? S.cs.invoiceData.split(',')[1] : '',
+    invoiceDocMime:   S.cs.invoiceData ? S.cs.invoiceData.split(';')[0].split(':')[1] : 'image/jpeg',
     slipDocBase64: slip ? slip.dataUrl.split(',')[1] : '',
     slipDocMime:   slip ? slip.mimeType : 'image/jpeg',
   });
   showToast(res && res.success ? 'Email sent ✓' : 'Email failed — check connection');
 }
+
+function openWhatsApp(mobile, text) {
+  var clean = mobile.replace(/\D/g,'');
+  var num = clean.length === 10 ? '91' + clean : clean;
+  window.open('https://wa.me/' + num + '?text=' + encodeURIComponent(text), '_blank');
+}
+
+function openWhatsAppCompany(text) {
+  var companyWA = localStorage.getItem('arora_company_wa') || '';
+  if (!companyWA) { showToast('Set company WhatsApp number in Settings first'); return; }
+  var clean = companyWA.replace(/\D/g,'');
+  var num = clean.length === 10 ? '91' + clean : clean;
+  window.open('https://wa.me/' + num + '?text=' + encodeURIComponent(text), '_blank');
+}
+
 
 // Legacy helpers kept for any remaining references
 function selectCourierMode(mode) { setCourierMode(mode); }
