@@ -2035,6 +2035,14 @@ function renderDriverUpload() {
 }
 
 function setUploadMode(mode) {
+  // Courier, Porter, Transport need the full Alert flow (invoice + slip + send)
+  // Own Fleet and Self Pick-up use the simple one-tap driver flow
+  if (mode === 'Courier' || mode === 'Porter' || mode === 'Transport') {
+    if (!S.csd) S.csd = {};
+    S.csd.mode = mode;
+    showScreen('courier-entry');
+    return;
+  }
   S.uploadMode = mode;
   renderDriverUpload();
 }
