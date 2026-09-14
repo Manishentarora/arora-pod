@@ -466,6 +466,10 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
         <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         Alert
       </button>
+      <button class="nav-btn" id="nav-batch" onclick="showScreen('batch-alerts')">
+        <svg viewBox="0 0 24 24"><path d="M3 8h18M3 12h18M3 16h18"/><circle cx="19" cy="8" r="3" fill="var(--ok)"/></svg>
+        Batch Send
+      </button>
       <button class="nav-btn" id="nav-unclear" onclick="showScreen('unclear-queue')">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         Unclear
@@ -1941,6 +1945,7 @@ function showScreen(screen, push=true) {
     'driver-upload': 'Upload POD',
     'dispatch-queue': 'Review Queue',
     'courier-entry': 'Dispatch Alert',
+    'batch-alerts':  'Batch Send',
     'tracker': 'Tracker',
     'analytics': 'Analytics',
     'escalations': 'Escalations',
@@ -1956,6 +1961,7 @@ function showScreen(screen, push=true) {
     case 'driver-success':   renderDriverSuccess(); break;
     case 'dispatch-queue':   renderDispatchQueue(); break;
     case 'courier-entry':    renderCourierEntry(); break;
+    case 'batch-alerts':     renderBatchAlerts(); break;
     case 'tracker':          renderTracker(); break;
     case 'analytics':        renderAnalytics(); break;
     case 'escalations':      renderEscalations(); break;
@@ -2759,6 +2765,9 @@ function renderCourierEntry() {
         // Submit to backend for OCR + auto-fill contact
         csSubmitInvoice(d, file);
       });
+      // Start showing "reading" status immediately while compressPhoto runs
+      var ocrStatus = document.getElementById('cs-ocr-status');
+      if (ocrStatus) ocrStatus.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-top:6px">⏳ Reading invoice... you can also type the invoice number below</div>';
     };
     r.readAsDataURL(file);
   };
@@ -2793,6 +2802,15 @@ function renderCourierEntry() {
   if (invEl) {
     var invVal = (S.csd && S.csd.invoiceNo) || (S.csd && S.csd.pod && S.csd.pod.invoice) || '';
     invEl.value = invVal;
+    // If dispatch types the invoice number manually, look up contact immediately
+    invEl.oninput = function() {
+      var typed = this.value.trim();
+      if (typed.length >= 6) { // enough chars to be a real invoice number
+        if (!S.csd) S.csd = {};
+        S.csd.invoiceNo = typed;
+        lookupContactAndFill('', typed);
+      }
+    };
   }
   var invEl = document.getElementById('cs-invoice');
   if (invEl) invEl.value = (S.csd && S.csd.invoiceNo) || (S.csd && S.csd.pod && S.csd.pod.invoice) || '';
@@ -2927,7 +2945,7 @@ function csSubmitInvoice(dataUrl, file) {
       }
       lookupContactAndFill(pod.customer, pod.invoice);
     }).catch(function(){});
-  }, 3000);
+  }, 1500);
   // Stop polling after 30 seconds regardless
   setTimeout(function(){
     clearInterval(ocrPollTimer);
@@ -3144,6 +3162,272 @@ function openWhatsAppCompany(text) {
 function selectCourierMode(mode) { setCourierMode(mode); }
 function previewDoc(type) {}
 const docUploads = {invoice: null, slip: null};
+
+
+// ═══════════════════════════════════════════════════════════
+// BATCH ALERTS — EOD send to all courier/transport/porter customers
+// ═══════════════════════════════════════════════════════════
+
+var S_batch = {
+  dateFrom: '',
+  dateTo: '',
+  items: [],       // filtered pods with editable contact fields
+  sending: false,
+  sentCount: 0,
+};
+
+function renderBatchAlerts() {
+  setNavActive('nav-dispatch', 'nav-batch');
+  var c = document.getElementById('main-content');
+
+  // Default date range: today
+  var today = new Date().toISOString().slice(0,10);
+  if (!S_batch.dateFrom) S_batch.dateFrom = today;
+  if (!S_batch.dateTo)   S_batch.dateTo   = today;
+
+  // Filter pods: courier/transport/porter only, within date range, not yet sent
+  var filtered = S.pods.filter(function(p) {
+    if (p.mode !== 'Courier' && p.mode !== 'Transport' && p.mode !== 'Porter') return false;
+    var d = p.dispatchDate || p.ts && new Date(p.ts).toISOString().slice(0,10) || '';
+    return d >= S_batch.dateFrom && d <= S_batch.dateTo;
+  });
+
+  // Merge with editable overrides stored in S_batch.items
+  var itemMap = {};
+  S_batch.items.forEach(function(it) { itemMap[it.id] = it; });
+  var items = filtered.map(function(p) {
+    return itemMap[p.id] || {
+      id:       p.id,
+      invoice:  p.invoice  || '',
+      customer: p.customer || '',
+      mobile:   p.mobile   || '',
+      email:    p.email    || '',
+      mode:     p.mode,
+      firm:     p.firm     || 'Firm 1',
+      date:     p.dispatchDate || '',
+      selected: true,
+      sent:     false,
+    };
+  });
+  S_batch.items = items;
+
+  var readyCount    = items.filter(function(it){ return it.selected && (it.mobile || it.email); }).length;
+  var missingCount  = items.filter(function(it){ return it.selected && !it.mobile && !it.email; }).length;
+
+  // Date range picker
+  var dateBar =
+    '<div style="background:var(--surface2);border-radius:12px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--text3)">DATE RANGE</div>' +
+    '<input type="date" id="batch-from" value="' + S_batch.dateFrom + '" onchange="batchSetDate()" style="flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1.5px solid var(--border);font-size:13px;background:var(--surface);color:var(--text)"/>' +
+    '<span style="font-size:12px;color:var(--text3)">to</span>' +
+    '<input type="date" id="batch-to" value="' + S_batch.dateTo + '" onchange="batchSetDate()" style="flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1.5px solid var(--border);font-size:13px;background:var(--surface);color:var(--text)"/>' +
+    '</div>';
+
+  // Summary bar
+  var summaryBar =
+    '<div style="display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap">' +
+    '<div style="flex:1;background:var(--info-soft);border-radius:10px;padding:8px 12px;text-align:center">' +
+      '<div style="font-size:20px;font-weight:800;color:var(--info-text)">' + items.length + '</div>' +
+      '<div style="font-size:10px;color:var(--info-text)">TOTAL</div>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--ok-soft);border-radius:10px;padding:8px 12px;text-align:center">' +
+      '<div style="font-size:20px;font-weight:800;color:var(--ok-text)">' + readyCount + '</div>' +
+      '<div style="font-size:10px;color:var(--ok-text)">READY</div>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--warn-soft);border-radius:10px;padding:8px 12px;text-align:center">' +
+      '<div style="font-size:20px;font-weight:800;color:var(--warn-text)">' + missingCount + '</div>' +
+      '<div style="font-size:10px;color:var(--warn-text)">MISSING</div>' +
+    '</div>' +
+    '</div>';
+
+  // Item list
+  var itemRows = items.length === 0
+    ? '<div style="text-align:center;padding:3rem 1rem;color:var(--text3)"><div style="font-size:2rem;margin-bottom:0.5rem">📭</div><p>No courier/transport/porter PODs in this date range</p></div>'
+    : items.map(function(it, idx) {
+        var hasContact = !!(it.mobile || it.email);
+        var bg = it.sent ? 'var(--ok-soft)' : hasContact ? 'var(--surface)' : 'var(--warn-soft)';
+        var borderColor = it.sent ? 'var(--ok)' : hasContact ? 'var(--border)' : 'var(--warn)';
+        return '<div style="background:' + bg + ';border:1.5px solid ' + borderColor + ';border-radius:12px;padding:0.75rem 1rem;margin-bottom:8px">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+            '<input type="checkbox" id="batch-chk-' + idx + '" ' + (it.selected ? 'checked' : '') + ' onchange="batchToggle(' + idx + ',this.checked)" style="width:18px;height:18px;cursor:pointer"/>' +
+            '<span style="font-weight:700;font-size:13px">' + escHtml(it.invoice || 'No invoice') + '</span>' +
+            '<span style="font-size:11px;color:var(--text3)">' + escHtml(it.mode) + ' · ' + escHtml(it.firm) + '</span>' +
+            (it.sent ? '<span style="margin-left:auto;font-size:11px;color:var(--ok);font-weight:700">✓ Sent</span>' : '') +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">' + escHtml(it.customer || 'Customer not read yet') + '</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<input type="tel" placeholder="WhatsApp number" value="' + escHtml(it.mobile) + '" ' +
+              'onchange="batchUpdateField(' + idx + ',&quot;mobile&quot;,this.value)" ' +
+              'style="flex:1;min-width:130px;padding:6px 8px;border-radius:8px;border:1.5px solid var(--border);font-size:12px;background:var(--surface);color:var(--text)"/>' +
+            '<input type="email" placeholder="Email address" value="' + escHtml(it.email) + '" ' +
+              'onchange="batchUpdateField(' + idx + ',&quot;email&quot;,this.value)" ' +
+              'style="flex:2;min-width:160px;padding:6px 8px;border-radius:8px;border:1.5px solid var(--border);font-size:12px;background:var(--surface);color:var(--text)"/>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+  // Action buttons
+  var actionBar = items.length === 0 ? '' :
+    '<div style="position:sticky;bottom:0;background:var(--bg);padding:1rem 0;border-top:1px solid var(--border);margin-top:1rem">' +
+    '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+      '<button class="btn btn-primary" style="flex:1;font-size:14px" onclick="batchSendEmail()" ' + (readyCount === 0 || S_batch.sending ? 'disabled' : '') + '>' +
+        (S_batch.sending ? '⏳ Sending...' : '✉ Send Email to ' + readyCount + ' customers') +
+      '</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px">' +
+      '<button class="btn btn-outline" style="flex:1;font-size:13px" onclick="batchSendWhatsApp(0)">' +
+        '📱 WhatsApp (one by one)' +
+      '</button>' +
+      '<button class="btn btn-outline" style="flex:1;font-size:13px;color:var(--text3)" onclick="batchRefreshContacts()">' +
+        '↻ Refresh contacts' +
+      '</button>' +
+    '</div>' +
+    (missingCount > 0 ? '<div style="font-size:11px;color:var(--warn-text);text-align:center;margin-top:6px">⚠ ' + missingCount + ' customer(s) missing contact — fill in above</div>' : '') +
+    '</div>';
+
+  c.innerHTML =
+    '<div style="padding-bottom:120px">' +
+    dateBar + summaryBar + itemRows +
+    '</div>' +
+    actionBar;
+}
+
+function batchSetDate() {
+  S_batch.dateFrom = (document.getElementById('batch-from')||{}).value || S_batch.dateFrom;
+  S_batch.dateTo   = (document.getElementById('batch-to')  ||{}).value || S_batch.dateTo;
+  S_batch.items = []; // reset so items are re-merged from pods
+  renderBatchAlerts();
+}
+
+function batchToggle(idx, checked) {
+  if (S_batch.items[idx]) S_batch.items[idx].selected = checked;
+}
+
+function batchUpdateField(idx, field, value) {
+  if (!S_batch.items[idx]) return;
+  S_batch.items[idx][field] = value.trim();
+  // Save to address book immediately
+  var it = S_batch.items[idx];
+  if ((it.mobile || it.email) && hasBackend()) {
+    sheetPost({action:'updateCustomer',
+      customerName: it.customer, mobile: it.mobile, email: it.email,
+      invoiceNo: it.invoice, firm: it.firm, updatedBy: S.user.name});
+    if (it.id) {
+      sheetPost({action:'updatePodDetails', id:it.id,
+        mobile:it.mobile, email:it.email, customer:it.customer, updatedBy:S.user.name});
+    }
+  }
+}
+
+function batchRefreshContacts() {
+  // Re-fetch pods to pick up any OCR results that came in
+  if (hasBackend()) {
+    showToast('Refreshing...');
+    loadPodsFromSheet().then(function() {
+      S_batch.items = []; // force re-merge
+      renderBatchAlerts();
+      showToast('Contacts refreshed');
+    });
+  }
+}
+
+async function batchSendEmail() {
+  var toSend = S_batch.items.filter(function(it){ return it.selected && it.email && !it.sent; });
+  if (toSend.length === 0) { showToast('No emails to send'); return; }
+  if (!confirm('Send email to ' + toSend.length + ' customer(s)? Emails will be sent with a 10-second delay between each.')) return;
+
+  S_batch.sending = true;
+  S_batch.sentCount = 0;
+  renderBatchAlerts();
+
+  for (var i = 0; i < toSend.length; i++) {
+    var it = toSend[i];
+    // Find the pod for invoice/slip attachments
+    var pod = S.pods.find(function(p){ return p.id === it.id; }) || {};
+    var firmName = (it.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
+
+    try {
+      var res = await sheetPost({
+        action:'sendAlert',
+        podId:       it.id,
+        firm:        it.firm,
+        invoiceNo:   it.invoice,
+        customer:    it.customer,
+        mobile:      it.mobile,
+        email:       it.email,
+        mode:        it.mode,
+        docket:      pod.docket || '',
+        expectedDate: pod.expectedDate || '',
+        sentBy:      S.user.name,
+      });
+
+      if (res && res.success) {
+        it.sent = true;
+        S_batch.sentCount++;
+        showToast('✓ Sent to ' + escHtml(it.customer || it.email) + ' (' + S_batch.sentCount + '/' + toSend.length + ')');
+      } else {
+        showToast('⚠ Failed: ' + escHtml(it.email));
+      }
+    } catch(e) {
+      showToast('⚠ Error sending to ' + escHtml(it.email));
+    }
+
+    // 10-second delay between emails to avoid spam filters (skip after last one)
+    if (i < toSend.length - 1) {
+      await new Promise(function(resolve){ setTimeout(resolve, 10000); });
+    }
+  }
+
+  S_batch.sending = false;
+  renderBatchAlerts();
+  showToast('✓ All emails sent (' + S_batch.sentCount + ' of ' + toSend.length + ')');
+}
+
+function batchSendWhatsApp(idx) {
+  var toSend = S_batch.items.filter(function(it){ return it.selected && it.mobile && !it.sent; });
+  if (toSend.length === 0) { showToast('No WhatsApp numbers to send to'); return; }
+  if (idx >= toSend.length) { showToast('All WhatsApp messages opened ✓'); return; }
+
+  var it = toSend[idx];
+  var firmName = (it.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
+  var customTpl = localStorage.getItem('arora_msg_template') || '';
+  var waText;
+  if (customTpl) {
+    waText = customTpl
+      .replace(/{customer}/g, it.customer || 'Customer')
+      .replace(/{firm}/g, firmName)
+      .replace(/{mode}/g, it.mode || '')
+      .replace(/{invoice}/g, it.invoice || '—')
+      .replace(/{delivery}/g, it.date || '—')
+      .replace(/{sender}/g, S.user ? S.user.name : '');
+  } else {
+    waText = 'Dear ' + (it.customer || 'Customer') + ',\n\n' +
+      'Your order from ' + firmName + ' has been dispatched via ' + (it.mode || '') + '.\n\n' +
+      'Invoice No.: ' + (it.invoice || '—') + '\n' +
+      'Please refer to the attached receipt for tracking details.\n\n' +
+      'Please ensure someone is available to receive and sign.\n\n' +
+      'Contact: ' + (S.user ? S.user.name : '') + ' | ' + firmName;
+  }
+
+  // Open WhatsApp for this customer
+  openWhatsApp(it.mobile, waText);
+
+  // Show next button after a moment
+  setTimeout(function() {
+    var remaining = toSend.length - idx - 1;
+    if (remaining > 0) {
+      showToast(remaining + ' more to send — tap WhatsApp again for next customer');
+      // Update the batch send button to show next
+      var btn = document.querySelector('[onclick*="batchSendWhatsApp"]');
+      if (btn) {
+        btn.textContent = '📱 WhatsApp next (' + remaining + ' remaining)';
+        btn.setAttribute('onclick', 'batchSendWhatsApp(' + (idx+1) + ')');
+      }
+    } else {
+      showToast('All WhatsApp messages sent ✓');
+    }
+  }, 1500);
+}
 
 
 // ═══════════════════════════════════════════════════════════
