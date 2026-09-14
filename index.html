@@ -2893,41 +2893,27 @@ function csSubmitInvoice(dataUrl, file) {
     ocrStatus.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-top:6px">⏳ Reading invoice details...</div>';
   }
 
-  // Fetch OCR result — try at 5s, retry at 10s if still processing
-  function fetchOCRResult(attempt) {
-    if (!S.csd || !S.csd.podId) return;
+  // Poll every 3 seconds until OCR is done (max 10 attempts = 30s)
+  var ocrPollTimer = setInterval(function() {
+    if (!S.csd) { clearInterval(ocrPollTimer); return; }
+    if (!S.csd.podId) return; // podId not set yet, keep waiting
     fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
-      {method:'GET',redirect:'follow'}, 15000)
+      {method:'GET',redirect:'follow'}, 10000)
     .then(function(r){return r.text();})
     .then(function(t){
       var data = JSON.parse(t);
       if (!data.success || !data.pods) return;
       var pod = data.pods.find(function(p){return p.id===S.csd.podId;});
       if (!pod) return;
-
-      // If still processing and we have a retry left, try again
-      if (pod.aiConfidence === 'processing' && attempt < 2) {
-        setTimeout(function(){fetchOCRResult(attempt+1);}, 7000);
-        return;
-      }
-
+      if (pod.aiConfidence === 'processing') return; // still running
+      // OCR done — stop polling
+      clearInterval(ocrPollTimer);
       S.csd.pod = pod;
-
-      // Store auto-filled values in S.csd
       if (pod.invoice && !S.csd.invoiceNo) S.csd.invoiceNo = pod.invoice;
       if (pod.customer) S.csd.customer = pod.customer;
       saveCsdSession();
-
-      // Update invoice/customer in DOM immediately
       var invEl = document.getElementById('cs-invoice');
       if (invEl && !invEl.value && pod.invoice) invEl.value = pod.invoice;
-
-      // Now do a fast contact lookup from the Customers tab
-      // This is separate from fetchPODs — it queries the address book directly
-      // so we get mobile/email even if the backend hasn't written them to the pod row yet
-      lookupContactAndFill(pod.customer, pod.invoice);
-
-      // Show OCR results panel
       var ocrStatus = document.getElementById('cs-ocr-status');
       if (ocrStatus) {
         var conf = pod.aiConfidence || 'low';
@@ -2935,23 +2921,23 @@ function csSubmitInvoice(dataUrl, file) {
         var lines = [];
         if (pod.invoice)  lines.push('Invoice: <strong>' + escHtml(pod.invoice) + '</strong>');
         if (pod.customer) lines.push('Customer: <strong>' + escHtml(pod.customer) + '</strong>');
-        if (lines.length > 0) {
-          ocrStatus.innerHTML =
-            '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid ' + confColor + '">' +
-            '<div style="font-size:10px;font-weight:700;color:' + confColor + ';margin-bottom:4px">✓ OCR READ (' + conf.toUpperCase() + ' CONFIDENCE)</div>' +
-            '<div style="font-size:13px;line-height:1.6">' + lines.join('<br/>') + '</div>' +
-            '</div>';
-        } else {
-          ocrStatus.innerHTML =
-            '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)">' +
-            '<div style="font-size:12px;color:var(--warn-text)">⚠ Could not read invoice details — please fill in manually below</div>' +
-            '</div>';
-        }
+        ocrStatus.innerHTML = lines.length > 0
+          ? '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid '+confColor+'"><div style="font-size:10px;font-weight:700;color:'+confColor+';margin-bottom:4px">\u2713 OCR READ ('+conf.toUpperCase()+' CONFIDENCE)</div><div style="font-size:13px;line-height:1.6">'+lines.join('<br/>')+'</div></div>'
+          : '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)"><div style="font-size:12px;color:var(--warn-text)">\u26a0 Could not read invoice \u2014 fill in manually below</div></div>';
       }
+      lookupContactAndFill(pod.customer, pod.invoice);
     }).catch(function(){});
-  }
-  setTimeout(function(){fetchOCRResult(1);}, 5000);
+  }, 3000);
+  // Stop polling after 30 seconds regardless
+  setTimeout(function(){
+    clearInterval(ocrPollTimer);
+    var ocrStatus = document.getElementById('cs-ocr-status');
+    if (ocrStatus && ocrStatus.innerHTML.indexOf('\u23f3') >= 0) {
+      ocrStatus.innerHTML = '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)"><div style="font-size:12px;color:var(--warn-text)">\u26a0 Taking too long \u2014 please fill invoice number manually below</div></div>';
+    }
+  }, 30000);
 }
+
 
 // Dedicated fast contact lookup — queries Customers tab directly
 // Called as soon as we know customer name or invoice number
