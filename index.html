@@ -2700,6 +2700,7 @@ function renderCourierEntry() {
     '<div id="cs-inv-preview" style="display:none;margin-bottom:8px">' +
       '<img id="cs-inv-img" src="" style="width:100%;max-height:160px;object-fit:contain;border-radius:8px;border:2px solid var(--ok)"/>' +
       '<div style="font-size:12px;color:var(--ok);font-weight:600;margin-top:4px">✓ Invoice captured</div>' +
+      '<div id="cs-ocr-status"></div>' +
     '</div>' +
     '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
       '<input id="cs-inv-input" name="cs-inv" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
@@ -2792,7 +2793,10 @@ function renderCourierEntry() {
   }
   var invEl = document.getElementById('cs-invoice');
   if (invEl) invEl.value = (S.csd && S.csd.invoiceNo) || (S.csd && S.csd.pod && S.csd.pod.invoice) || '';
-  if (S.csd && S.csd.mobile) document.getElementById('cs-mobile').value = S.csd.mobile;
+  var mEl = document.getElementById('cs-mobile');
+  var eEl = document.getElementById('cs-email');
+  if (mEl && S.csd && S.csd.mobile) mEl.value = S.csd.mobile;
+  if (eEl && S.csd && S.csd.email)  eEl.value = S.csd.email;
   if (S.csd && S.csd.email)  document.getElementById('cs-email').value  = S.csd.email;
   if (S.csd && S.csd.date)   document.getElementById('cs-date').value   = S.csd.date;
   // Restore previews
@@ -2845,8 +2849,14 @@ function csSubmitInvoice(dataUrl, file) {
     photoBase64:dataUrl.split(',')[1],
     photoMimeType:dataUrl.split(';')[0].split(':')[1]
   });
-  // Fetch OCR result after delay and auto-fill contact
-  setTimeout(function() {
+  // Show "reading..." status below invoice image immediately
+  var ocrStatus = document.getElementById('cs-ocr-status');
+  if (ocrStatus) {
+    ocrStatus.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-top:6px">⏳ Reading invoice details...</div>';
+  }
+
+  // Fetch OCR result after delay — try at 8s, retry at 15s if still processing
+  function fetchOCRResult(attempt) {
     if (!S.csd || !S.csd.podId) return;
     fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
       {method:'GET',redirect:'follow'}, 15000)
@@ -2856,15 +2866,56 @@ function csSubmitInvoice(dataUrl, file) {
       if (!data.success || !data.pods) return;
       var pod = data.pods.find(function(p){return p.id===S.csd.podId;});
       if (!pod) return;
+
+      // If still processing and we have a retry left, try again
+      if (pod.aiConfidence === 'processing' && attempt < 2) {
+        setTimeout(function(){fetchOCRResult(attempt+1);}, 8000);
+        return;
+      }
+
       S.csd.pod = pod;
-      // Auto-fill contact if found in address book
+
+      // Store auto-filled values in S.csd so they persist across re-renders
+      if (pod.mobile) S.csd.mobile = S.csd.mobile || pod.mobile;
+      if (pod.email)  S.csd.email  = S.csd.email  || pod.email;
+      if (pod.invoice && !S.csd.invoiceNo) S.csd.invoiceNo = pod.invoice;
+      if (pod.customer) S.csd.customer = pod.customer;
+
+      // Update DOM if fields are still on screen
+      var invEl    = document.getElementById('cs-invoice');
       var mobileEl = document.getElementById('cs-mobile');
       var emailEl  = document.getElementById('cs-email');
-      if (mobileEl && !mobileEl.value && pod.mobile) mobileEl.value = pod.mobile;
-      if (emailEl  && !emailEl.value  && pod.email)  emailEl.value  = pod.email;
+      if (invEl    && !invEl.value    && pod.invoice) invEl.value    = pod.invoice;
+      if (mobileEl && !mobileEl.value && pod.mobile)  mobileEl.value = pod.mobile;
+      if (emailEl  && !emailEl.value  && pod.email)   emailEl.value  = pod.email;
+
+      // Show OCR results below invoice image
+      var ocrStatus = document.getElementById('cs-ocr-status');
+      if (ocrStatus) {
+        var conf = pod.aiConfidence || 'low';
+        var confColor = conf === 'high' ? 'var(--ok)' : conf === 'medium' ? 'var(--warn)' : 'var(--accent)';
+        var lines = [];
+        if (pod.invoice)  lines.push('Invoice: <strong>' + escHtml(pod.invoice) + '</strong>');
+        if (pod.customer) lines.push('Customer: <strong>' + escHtml(pod.customer) + '</strong>');
+        if (lines.length > 0) {
+          ocrStatus.innerHTML =
+            '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid ' + confColor + '">' +
+            '<div style="font-size:10px;font-weight:700;color:' + confColor + ';margin-bottom:4px">✓ OCR READ (' + conf.toUpperCase() + ' CONFIDENCE)</div>' +
+            '<div style="font-size:13px;line-height:1.6">' + lines.join('<br/>') + '</div>' +
+            (pod.mobile || pod.email ? '<div style="font-size:11px;color:var(--ok);margin-top:4px">📒 Contact auto-filled from address book</div>' : '') +
+            '</div>';
+        } else {
+          ocrStatus.innerHTML =
+            '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)">' +
+            '<div style="font-size:12px;color:var(--warn-text)">⚠ Could not read invoice details — please fill in manually below</div>' +
+            '</div>';
+        }
+      }
+
       if (pod.mobile || pod.email) showToast('📒 Contact auto-filled from address book');
     }).catch(function(){});
-  }, 8000);
+  }
+  setTimeout(function(){fetchOCRResult(1);}, 8000);
 }
 
 function csPreviewSend() {
