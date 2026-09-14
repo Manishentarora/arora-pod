@@ -2878,14 +2878,18 @@ function courierGoToReview(){csPreviewSend();}
 
 
 function renderCourierSend() {
-  var cs = S.cs; var pod = cs.pod || {};
-  var firmName = (pod.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
-  var expLine = pod.expectedDate ? new Date(pod.expectedDate).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '';
+  var csd = S.csd || {}; var pod = csd.pod || {};
+  // Merge contact fields entered by dispatch into pod display
+  var mobile = csd.mobile || pod.mobile || '';
+  var email  = csd.email  || pod.email  || '';
+  var mode   = csd.mode   || '';
+  var firmName = (pod.firm || S.user.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
+  var expLine = csd.date ? new Date(csd.date).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '';
 
   var waLines = [
     'Dear ' + (pod.customer || 'Customer') + ',',
     '',
-    'Your order from ' + firmName + ' has been dispatched via ' + cs.mode + '.',
+    'Your order from ' + firmName + ' has been dispatched via ' + mode + '.',
     '',
     'Invoice No.: ' + (pod.invoice || '—'),
     'Please refer to the attached receipt for tracking details.',
@@ -2900,9 +2904,9 @@ function renderCourierSend() {
   var fields = [
     ['Invoice',  pod.invoice  || '—'],
     ['Customer', pod.customer || '—'],
-    ['Mode',     cs.mode],
-    ['Mobile',   pod.mobile   || '—'],
-    ['Email',    pod.email    || '—']
+    ['Mode',     mode],
+    ['Mobile',   mobile       || '—'],
+    ['Email',    email        || '—']
   ];
   if (expLine) fields.push(['Delivery', expLine]);
 
@@ -2919,17 +2923,16 @@ function renderCourierSend() {
       '<div id="wa-preview-courier" style="font-size:12px;white-space:pre-line;background:var(--surface2);padding:0.75rem;border-radius:8px">' + escHtml(waText) + '</div>' +
     '</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">' +
-      (pod.mobile ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(\'customer\')">📱 WhatsApp → ' + escHtml(pod.mobile) + '</button>' : '<div style="font-size:12px;color:var(--text3);padding:0.5rem 0">⚠ No customer mobile saved</div>') +
-      (pod.email  ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(pod.email) + '</button>' : '<div style="font-size:12px;color:var(--text3);padding:0.5rem 0">⚠ No customer email saved</div>') +
-      '<button class="wa-btn" style="width:100%;font-size:13px;opacity:0.85" onclick="sendCourierWA(\'company\')">📱 WhatsApp → Company copy</button>' +
-      '<button class="btn btn-outline" style="width:100%;font-size:12px" onclick="copyText(\'wa-preview-courier\')">📋 Copy message text</button>' +
+      (mobile ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(&apos;customer&apos;)">📱 WhatsApp → ' + escHtml(mobile) + '</button>' : '<div style="font-size:12px;color:var(--text3)">⚠ No customer mobile</div>') +
+      (email  ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(email) + '</button>' : '<div style="font-size:12px;color:var(--text3)">⚠ No customer email</div>') +
+      '<button class="wa-btn" style="width:100%;font-size:13px;opacity:0.85" onclick="sendCourierWA(&apos;company&apos;)">📱 WhatsApp → Company copy</button>' +
+      '<button class="btn btn-outline" style="width:100%;font-size:12px" onclick="copyText(&apos;wa-preview-courier&apos;)">📋 Copy message text</button>' +
     '</div>' +
     '<div style="display:flex;gap:8px">' +
       '<button class="btn btn-outline" style="flex:1" onclick="renderCourierEntry()">← Back</button>' +
-      '<button class="btn btn-outline" style="flex:1" onclick="S.cs=null;showScreen(\'dispatch-queue\')">✓ Done</button>' +
+      '<button class="btn btn-outline" style="flex:1" onclick="S.csd=null;showScreen(&apos;dispatch-queue&apos;)">✓ Done</button>' +
     '</div>';
 }
-
 
 // Keep old function names working
 
@@ -2939,31 +2942,34 @@ function sendCourierWA(target) {
   if (target === 'company') {
     openWhatsAppCompany(text);
   } else {
-    var mobile = S.cs && S.cs.pod ? (S.cs.pod.mobile||'') : '';
+    var mobile = (S.csd && S.csd.mobile) || '';
     if (!mobile) { showToast('No customer mobile number'); return; }
     openWhatsApp(mobile, text);
   }
 }
 
 async function sendCourierEmail() {
-  var pod  = S.cs && S.cs.pod ? S.cs.pod : {};
-  var slip = S.cs ? S.cs.slipData : null;
-  if (!pod.email) { showToast('No customer email address'); return; }
-  if (!confirm('Send email to ' + pod.email + '?')) return;
+  var csd  = S.csd || {};
+  var pod  = csd.pod || {};
+  var slip = csd.slipData;
+  var email = csd.email || pod.email || '';
+  if (!email) { showToast('No customer email address'); return; }
+  if (!confirm('Send email to ' + email + '?')) return;
   if (!hasBackend()) { showToast('No backend connected'); return; }
   var res = await sheetPost({
-    action:'sendAlert', podId:pod.id||'', firm:pod.firm||'Firm 1',
+    action:'sendAlert', podId:pod.id||'', firm:pod.firm||S.user.firm||'Firm 1',
     invoiceNo:pod.invoice||'', customer:pod.customer||'',
-    mobile:pod.mobile||'', email:pod.email,
-    mode:S.cs.mode, docket:'', expectedDate:pod.expectedDate||'',
+    mobile:csd.mobile||'', email:email,
+    mode:csd.mode||'', docket:'', expectedDate:csd.date||'',
     sentBy:S.user.name,
-    invoiceDocBase64: S.cs.invoiceData ? S.cs.invoiceData.split(',')[1] : '',
-    invoiceDocMime:   S.cs.invoiceData ? S.cs.invoiceData.split(';')[0].split(':')[1] : 'image/jpeg',
+    invoiceDocBase64: csd.invoiceData ? csd.invoiceData.split(',')[1] : '',
+    invoiceDocMime:   csd.invoiceData ? csd.invoiceData.split(';')[0].split(':')[1] : 'image/jpeg',
     slipDocBase64: slip ? slip.dataUrl.split(',')[1] : '',
     slipDocMime:   slip ? slip.mimeType : 'image/jpeg',
   });
   showToast(res && res.success ? 'Email sent ✓' : 'Email failed — check connection');
 }
+
 
 function openWhatsApp(mobile, text) {
   var clean = mobile.replace(/\D/g,'');
