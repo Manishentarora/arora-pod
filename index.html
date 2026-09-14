@@ -2855,7 +2855,7 @@ function csSubmitInvoice(dataUrl, file) {
     ocrStatus.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-top:6px">⏳ Reading invoice details...</div>';
   }
 
-  // Fetch OCR result after delay — try at 8s, retry at 15s if still processing
+  // Fetch OCR result — try at 5s, retry at 10s if still processing
   function fetchOCRResult(attempt) {
     if (!S.csd || !S.csd.podId) return;
     fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
@@ -2869,27 +2869,26 @@ function csSubmitInvoice(dataUrl, file) {
 
       // If still processing and we have a retry left, try again
       if (pod.aiConfidence === 'processing' && attempt < 2) {
-        setTimeout(function(){fetchOCRResult(attempt+1);}, 8000);
+        setTimeout(function(){fetchOCRResult(attempt+1);}, 7000);
         return;
       }
 
       S.csd.pod = pod;
 
-      // Store auto-filled values in S.csd so they persist across re-renders
-      if (pod.mobile) S.csd.mobile = S.csd.mobile || pod.mobile;
-      if (pod.email)  S.csd.email  = S.csd.email  || pod.email;
+      // Store auto-filled values in S.csd
       if (pod.invoice && !S.csd.invoiceNo) S.csd.invoiceNo = pod.invoice;
       if (pod.customer) S.csd.customer = pod.customer;
 
-      // Update DOM if fields are still on screen
-      var invEl    = document.getElementById('cs-invoice');
-      var mobileEl = document.getElementById('cs-mobile');
-      var emailEl  = document.getElementById('cs-email');
-      if (invEl    && !invEl.value    && pod.invoice) invEl.value    = pod.invoice;
-      if (mobileEl && !mobileEl.value && pod.mobile)  mobileEl.value = pod.mobile;
-      if (emailEl  && !emailEl.value  && pod.email)   emailEl.value  = pod.email;
+      // Update invoice/customer in DOM immediately
+      var invEl = document.getElementById('cs-invoice');
+      if (invEl && !invEl.value && pod.invoice) invEl.value = pod.invoice;
 
-      // Show OCR results below invoice image
+      // Now do a fast contact lookup from the Customers tab
+      // This is separate from fetchPODs — it queries the address book directly
+      // so we get mobile/email even if the backend hasn't written them to the pod row yet
+      lookupContactAndFill(pod.customer, pod.invoice);
+
+      // Show OCR results panel
       var ocrStatus = document.getElementById('cs-ocr-status');
       if (ocrStatus) {
         var conf = pod.aiConfidence || 'low';
@@ -2902,7 +2901,6 @@ function csSubmitInvoice(dataUrl, file) {
             '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid ' + confColor + '">' +
             '<div style="font-size:10px;font-weight:700;color:' + confColor + ';margin-bottom:4px">✓ OCR READ (' + conf.toUpperCase() + ' CONFIDENCE)</div>' +
             '<div style="font-size:13px;line-height:1.6">' + lines.join('<br/>') + '</div>' +
-            (pod.mobile || pod.email ? '<div style="font-size:11px;color:var(--ok);margin-top:4px">📒 Contact auto-filled from address book</div>' : '') +
             '</div>';
         } else {
           ocrStatus.innerHTML =
@@ -2911,11 +2909,51 @@ function csSubmitInvoice(dataUrl, file) {
             '</div>';
         }
       }
-
-      if (pod.mobile || pod.email) showToast('📒 Contact auto-filled from address book');
     }).catch(function(){});
   }
-  setTimeout(function(){fetchOCRResult(1);}, 8000);
+  setTimeout(function(){fetchOCRResult(1);}, 5000);
+}
+
+// Dedicated fast contact lookup — queries Customers tab directly
+// Called as soon as we know customer name or invoice number
+function lookupContactAndFill(customerName, invoiceNo) {
+  if (!hasBackend()) return;
+  if (!customerName && !invoiceNo) return;
+  var url = S.backendUrl + '?action=lookupContact';
+  if (customerName) url += '&customer=' + encodeURIComponent(customerName);
+  if (invoiceNo)    url += '&invoiceNo=' + encodeURIComponent(invoiceNo);
+  fetchWithTimeout(url, {method:'GET', redirect:'follow'}, 10000)
+  .then(function(r){return r.text();})
+  .then(function(t){
+    var data = JSON.parse(t);
+    if (!data.success || !data.contact) return;
+    var contact = data.contact;
+    // Fill mobile and email if not already entered by dispatch
+    var mobileEl = document.getElementById('cs-mobile');
+    var emailEl  = document.getElementById('cs-email');
+    var filled = false;
+    if (mobileEl && !mobileEl.value && contact.mobile) {
+      mobileEl.value = contact.mobile;
+      S.csd.mobile = contact.mobile;
+      filled = true;
+    }
+    if (emailEl && !emailEl.value && contact.email) {
+      emailEl.value = contact.email;
+      S.csd.email = contact.email;
+      filled = true;
+    }
+    if (filled) {
+      showToast('📒 Contact auto-filled from address book');
+      // Update OCR status panel to show contact was found
+      var ocrStatus = document.getElementById('cs-ocr-status');
+      if (ocrStatus && ocrStatus.innerHTML) {
+        var note = '<div style="font-size:11px;color:var(--ok);margin-top:4px;font-weight:600">📒 Mobile & email auto-filled from address book</div>';
+        if (!ocrStatus.innerHTML.includes('auto-filled')) {
+          ocrStatus.querySelector('div') && (ocrStatus.querySelector('div').innerHTML += note);
+        }
+      }
+    }
+  }).catch(function(){});
 }
 
 function csPreviewSend() {
@@ -2927,14 +2965,24 @@ function csPreviewSend() {
   if (!S.csd.invoiceData) { showToast('Please photograph the invoice first'); return; }
   if (!S.csd.slipData)    { showToast('Please add the ' + (S.csd.mode==='Transport'?'LR copy':S.csd.mode==='Porter'?'Porter receipt':'docket slip') + ' first'); return; }
   if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
-  // Save contact to address book — send invoiceNo so it can be keyed
-  // even when OCR hasn't returned the customer name yet
-  if ((S.csd.mobile || S.csd.email) && hasBackend() && S.csd.podId) {
-    sheetPost({action:'updatePodDetails', id:S.csd.podId,
-      mobile:S.csd.mobile, email:S.csd.email,
-      invoiceNo: S.csd.invoiceNo || (S.csd.pod && S.csd.pod.invoice) || '',
-      customer:(S.csd.pod&&S.csd.pod.customer)||S.csd.customer||'',
-      updatedBy:S.user.name});
+  // Save contact to address book
+  // Use podId if available, otherwise save directly via a dedicated action
+  var saveInvNo = S.csd.invoiceNo || (S.csd.pod && S.csd.pod.invoice) || '';
+  var saveCust  = (S.csd.pod && S.csd.pod.customer) || S.csd.customer || '';
+  if ((S.csd.mobile || S.csd.email) && hasBackend()) {
+    if (S.csd.podId) {
+      // Update the existing POD row — this also triggers upsertCustomer in backend
+      sheetPost({action:'updatePodDetails', id:S.csd.podId,
+        mobile:S.csd.mobile, email:S.csd.email,
+        invoiceNo:saveInvNo, customer:saveCust, updatedBy:S.user.name});
+    } else {
+      // No POD row yet — save directly to Customers tab using dedicated action
+      sheetPost({action:'updateCustomer',
+        customerName: saveCust,
+        mobile: S.csd.mobile, email: S.csd.email,
+        invoiceNo: saveInvNo, firm: S.user.firm || 'Firm 1',
+        updatedBy: S.user.name});
+    }
   }
   renderCourierSend();
 }
