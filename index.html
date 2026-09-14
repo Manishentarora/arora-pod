@@ -1063,6 +1063,10 @@ async function saveBackendUrl() {
     if (companyEmail && companyEmail.value.trim()) {
       localStorage.setItem('arora_company_email', companyEmail.value.trim());
     }
+    const msgTpl = document.getElementById('edit-msg-template');
+    if (msgTpl && S.user && S.user.role === 'management') {
+      msgTpl.value.trim() ? localStorage.setItem('arora_msg_template', msgTpl.value.trim()) : localStorage.removeItem('arora_msg_template');
+    }
     const banner = document.getElementById('config-banner');
     if (banner) banner.remove();
     if (statusEl) { statusEl.textContent = '✅ Connected! Loading your data...'; statusEl.style.color = 'var(--ok-text)'; }
@@ -1470,6 +1474,11 @@ function showDriverSettings() {
       <input type="email" id="edit-company-email" value="${escHtml(localStorage.getItem('arora_company_email')||'')}"
         placeholder="accounts@aroraent.com" style="font-size:12px"/>
       <div style="font-size:11px;color:var(--text3);margin-top:3px">CC'd on every dispatch email sent to customers</div>
+    </div>
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)" class="field">
+      <label class="label">Alert Message Template <span style="font-size:10px;color:var(--accent)">(Management only)</span></label>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Placeholders: {customer} {firm} {mode} {invoice} {delivery} {sender}<br/>Leave blank for default.</div>
+      <textarea id="edit-msg-template" rows="7" style="width:100%;padding:10px;border-radius:8px;border:1.5px solid var(--border);font-size:12px;font-family:inherit;background:var(--surface);color:var(--text);resize:vertical">${S.user&&S.user.role==='management'?escHtml(localStorage.getItem('arora_msg_template')||''): '(management only)'}</textarea>
     </div>
     <div style="margin-top:1.5rem;text-align:center">
       <button onclick="clearDriverProfile()" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;font-family:inherit">Reset this device (logout)</button>
@@ -2720,7 +2729,9 @@ function renderCourierEntry() {
     '</div>' +
 
     '<div style="margin-bottom:1rem">' +
-    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">3 — CUSTOMER CONTACT</div>' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">3 — INVOICE &amp; CUSTOMER DETAILS</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Invoice number (confirm or type if OCR missed it)</div>' +
+    '<input id="cs-invoice" type="text" placeholder="e.g. GST/26-27/4259 or AITPL26-27/1320" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
     '<input id="cs-mobile" type="tel" placeholder="Customer WhatsApp number" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
     '<input id="cs-email" type="email" placeholder="Customer email address" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
     '<input id="cs-date" type="date" placeholder="Expected delivery date" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
@@ -2774,6 +2785,13 @@ function renderCourierEntry() {
   // Restore previously selected mode
   if (S.csd && S.csd.mode) csSelectMode(document.getElementById('cs-btn-' + S.csd.mode));
   // Restore contact fields if returning from preview
+  var invEl = document.getElementById('cs-invoice');
+  if (invEl) {
+    var invVal = (S.csd && S.csd.invoiceNo) || (S.csd && S.csd.pod && S.csd.pod.invoice) || '';
+    invEl.value = invVal;
+  }
+  var invEl = document.getElementById('cs-invoice');
+  if (invEl) invEl.value = (S.csd && S.csd.invoiceNo) || (S.csd && S.csd.pod && S.csd.pod.invoice) || '';
   if (S.csd && S.csd.mobile) document.getElementById('cs-mobile').value = S.csd.mobile;
   if (S.csd && S.csd.email)  document.getElementById('cs-email').value  = S.csd.email;
   if (S.csd && S.csd.date)   document.getElementById('cs-date').value   = S.csd.date;
@@ -2851,9 +2869,10 @@ function csSubmitInvoice(dataUrl, file) {
 
 function csPreviewSend() {
   if (!S.csd) S.csd = {};
-  S.csd.mobile = (document.getElementById('cs-mobile')||{}).value||'';
-  S.csd.email  = (document.getElementById('cs-email') ||{}).value||'';
-  S.csd.date   = (document.getElementById('cs-date')  ||{}).value||'';
+  S.csd.invoiceNo = (document.getElementById('cs-invoice')||{}).value||'';
+  S.csd.mobile    = (document.getElementById('cs-mobile') ||{}).value||'';
+  S.csd.email     = (document.getElementById('cs-email')  ||{}).value||'';
+  S.csd.date      = (document.getElementById('cs-date')   ||{}).value||'';
   if (!S.csd.invoiceData) { showToast('Please photograph the invoice first'); return; }
   if (!S.csd.slipData)    { showToast('Please add the ' + (S.csd.mode==='Transport'?'LR copy':S.csd.mode==='Porter'?'Porter receipt':'docket slip') + ' first'); return; }
   if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
@@ -2886,12 +2905,18 @@ function renderCourierSend() {
   var firmName = (pod.firm || S.user.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
   var expLine = csd.date ? new Date(csd.date).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '';
 
+  var invoiceNo = csd.invoiceNo || pod.invoice || '—';
+  var customTpl = localStorage.getItem('arora_msg_template') || '';
+  var waText;
+  if (customTpl) {
+    waText = customTpl.replace(/{customer}/g, pod.customer||'Customer').replace(/{firm}/g,firmName).replace(/{mode}/g,mode).replace(/{invoice}/g,invoiceNo).replace(/{delivery}/g,expLine||'—').replace(/{sender}/g,S.user?S.user.name:'');
+  } else {
   var waLines = [
     'Dear ' + (pod.customer || 'Customer') + ',',
     '',
     'Your order from ' + firmName + ' has been dispatched via ' + mode + '.',
     '',
-    'Invoice No.: ' + (pod.invoice || '—'),
+    'Invoice No.: ' + (csd.invoiceNo || pod.invoice || '—'),
     'Please refer to the attached receipt for tracking details.',
     expLine ? 'Expected delivery: ' + expLine : '',
     '',
@@ -2899,10 +2924,11 @@ function renderCourierSend() {
     '',
     'Contact: ' + (S.user ? S.user.name : '') + ' | ' + firmName
   ];
-  var waText = waLines.filter(function(l, i) { return !(l === '' && waLines[i-1] === ''); }).join('\n');
+  waText = waLines.filter(function(l, i) { return !(l === '' && waLines[i-1] === ''); }).join('\n');
+  }
 
   var fields = [
-    ['Invoice',  pod.invoice  || '—'],
+    ['Invoice',  csd.invoiceNo || pod.invoice || '—'],
     ['Customer', pod.customer || '—'],
     ['Mode',     mode],
     ['Mobile',   mobile       || '—'],
