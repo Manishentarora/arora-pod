@@ -2682,6 +2682,9 @@ function renderCourierEntry() {
   if (S.user.role === 'management') setNavActive('nav-management','nav-mqueue');
   else setNavActive('nav-dispatch','nav-courier');
 
+  // Restore session data if S.csd was lost due to navigation
+  loadCsdSession();
+
   var c = document.getElementById('main-content');
   c.innerHTML =
     '<div style="padding-bottom:2rem">' +
@@ -2750,7 +2753,7 @@ function renderCourierEntry() {
     r.onload = function(ev) {
       compressPhoto(ev.target.result, 1200, 0.70).then(function(d) {
         if (!S.csd) S.csd = {};
-        S.csd.invoiceData = d; S.csd.invoiceFile = file;
+        S.csd.invoiceData = d; S.csd.invoiceFile = file; saveCsdSession();
         document.getElementById('cs-inv-img').src = d;
         document.getElementById('cs-inv-preview').style.display = 'block';
         // Submit to backend for OCR + auto-fill contact
@@ -2768,7 +2771,7 @@ function renderCourierEntry() {
       var r = new FileReader();
       r.onload = function(ev) {
         if (!S.csd) S.csd = {};
-        S.csd.slipData = {dataUrl: ev.target.result, mimeType: file.type, name: file.name, isPdf: file.type === 'application/pdf'};
+        S.csd.slipData = {dataUrl: ev.target.result, mimeType: file.type, name: file.name, isPdf: file.type === 'application/pdf'}; saveCsdSession();
         var wrap = document.getElementById('cs-slip-img-wrap');
         if (file.type === 'application/pdf') {
           wrap.innerHTML = '<div style="background:var(--surface2);border-radius:8px;padding:1rem;display:flex;align-items:center;gap:10px"><span style="font-size:2rem">📄</span><div><div style="font-weight:600;font-size:13px">' + escHtml(file.name) + '</div></div></div>';
@@ -2828,10 +2831,45 @@ function csSelectMode(btn) {
     var mode = btn.getAttribute('data-m') || btn.dataset.m;
     if (!S.csd) S.csd = {};
     S.csd.mode = mode;
+    saveCsdSession();
     var labels = {Courier:'Courier Docket / AWB Slip', Porter:'Porter Receipt / Booking ID', Transport:'LR / Consignment Note'};
     var lbl = document.getElementById('cs-slip-label');
     if (lbl) lbl.textContent = '2 — ' + (labels[mode] || 'Receipt').toUpperCase();
   }
+}
+
+function saveCsdSession() {
+  // Persist courier session to sessionStorage (survives nav, cleared on browser close)
+  // Don't persist the large image data — just the metadata
+  if (!S.csd) return;
+  var toSave = {
+    mode:      S.csd.mode      || '',
+    invoiceNo: S.csd.invoiceNo || '',
+    mobile:    S.csd.mobile    || '',
+    email:     S.csd.email     || '',
+    date:      S.csd.date      || '',
+    customer:  S.csd.customer  || '',
+    podId:     S.csd.podId     || '',
+    hasInvoice: !!(S.csd.invoiceData),
+    hasSlip:    !!(S.csd.slipData),
+  };
+  try { sessionStorage.setItem('arora_csd', JSON.stringify(toSave)); } catch(e) {}
+}
+
+function loadCsdSession() {
+  try {
+    var saved = sessionStorage.getItem('arora_csd');
+    if (!saved) return;
+    var d = JSON.parse(saved);
+    if (!S.csd) S.csd = {};
+    if (d.mode      && !S.csd.mode)      S.csd.mode      = d.mode;
+    if (d.invoiceNo && !S.csd.invoiceNo) S.csd.invoiceNo = d.invoiceNo;
+    if (d.mobile    && !S.csd.mobile)    S.csd.mobile    = d.mobile;
+    if (d.email     && !S.csd.email)     S.csd.email     = d.email;
+    if (d.date      && !S.csd.date)      S.csd.date      = d.date;
+    if (d.customer  && !S.csd.customer)  S.csd.customer  = d.customer;
+    if (d.podId     && !S.csd.podId)     S.csd.podId     = d.podId;
+  } catch(e) {}
 }
 
 function csSubmitInvoice(dataUrl, file) {
@@ -2878,6 +2916,7 @@ function csSubmitInvoice(dataUrl, file) {
       // Store auto-filled values in S.csd
       if (pod.invoice && !S.csd.invoiceNo) S.csd.invoiceNo = pod.invoice;
       if (pod.customer) S.csd.customer = pod.customer;
+      saveCsdSession();
 
       // Update invoice/customer in DOM immediately
       var invEl = document.getElementById('cs-invoice');
@@ -2962,6 +3001,7 @@ function csPreviewSend() {
   S.csd.mobile    = (document.getElementById('cs-mobile') ||{}).value||'';
   S.csd.email     = (document.getElementById('cs-email')  ||{}).value||'';
   S.csd.date      = (document.getElementById('cs-date')   ||{}).value||'';
+  saveCsdSession();
   if (!S.csd.invoiceData) { showToast('Please photograph the invoice first'); return; }
   if (!S.csd.slipData)    { showToast('Please add the ' + (S.csd.mode==='Transport'?'LR copy':S.csd.mode==='Porter'?'Porter receipt':'docket slip') + ' first'); return; }
   if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
@@ -2991,8 +3031,8 @@ function csPreviewSend() {
 function csSetMode(m) { var btn=document.getElementById('cs-btn-'+m); if(btn) csSelectMode(btn); else { if(!S.csd)S.csd={}; S.csd.mode=m; } }
 function courierNextStep(){}
 function courierPrevStep(){}
-function resetCourierSession(){S.csd=null;renderCourierEntry();}
-function courierDone(){S.csd=null;showScreen('dispatch-queue');}
+function resetCourierSession(){S.csd=null;try{sessionStorage.removeItem('arora_csd');}catch(e){}renderCourierEntry();}
+function courierDone(){S.csd=null;try{sessionStorage.removeItem('arora_csd');}catch(e){}showScreen('dispatch-queue');}
 function handleSlipFile(e){var el=document.getElementById('cs-slip-cam');if(el&&el.onchange)el.onchange(e);}
 function handleCourierInvoicePhoto(e){var el=document.getElementById('cs-inv-input');if(el&&el.onchange)el.onchange(e);}
 function courierGoToReview(){csPreviewSend();}
