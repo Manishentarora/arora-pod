@@ -2654,188 +2654,211 @@ function editPodField(podId, fieldKey, label, currentValue) {
 // Preview → confirm → auto-email + WhatsApp draft
 // ═══════════════════════════════════════════════════════════
 function renderCourierEntry() {
-  if (S.user.role === 'management') setNavActive('nav-management', 'nav-mqueue');
-  else setNavActive('nav-dispatch', 'nav-courier');
-  const c = document.getElementById('main-content');
-  if (!S.cs) S.cs = {mode:'', invoiceData:null, slipData:null};
-  const cs = S.cs;
+  if (S.user.role === 'management') setNavActive('nav-management','nav-mqueue');
+  else setNavActive('nav-dispatch','nav-courier');
 
-  const modeBar = '<div style="margin-bottom:1rem">' +
-    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">SHIPMENT TYPE</div>' +
-    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">' +
-    ['Courier','Porter','Transport'].map(function(m) {
-      var sel = cs.mode === m;
-      return '<button data-mode="' + m + '" onclick="csSetMode(this.dataset.mode)" style="padding:10px 4px;border-radius:10px;border:2px solid ' +
-        (sel ? 'var(--info)' : 'var(--border)') + ';background:' + (sel ? 'var(--info-soft)' : 'var(--surface)') +
-        ';color:' + (sel ? 'var(--info-text)' : 'var(--text)') + ';font-size:12px;font-weight:' + (sel ? '700' : '500') +
-        ';cursor:pointer;font-family:inherit;text-align:center">' +
-        (m==='Courier'?'📦':m==='Porter'?'🛵':'🚛') + '<br/>' + m + '</button>';
-    }).join('') +
-    '</div></div>';
+  var c = document.getElementById('main-content');
+  c.innerHTML =
+    '<div style="padding-bottom:2rem">' +
 
-  var slipLabel = cs.mode === 'Transport' ? 'LR / Consignment note'
-                : cs.mode === 'Porter'    ? 'Porter receipt / booking ID'
-                :                           'Courier docket / AWB slip';
+    '<div style="margin-bottom:1rem">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">SELECT TYPE</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px" id="cs-mode-grid">' +
+    '<button id="cs-btn-Courier"   onclick="csSelectMode(this)" data-m="Courier"   style="padding:10px 4px;border-radius:10px;border:2px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;font-family:inherit">📦<br/>Courier</button>' +
+    '<button id="cs-btn-Porter"    onclick="csSelectMode(this)" data-m="Porter"    style="padding:10px 4px;border-radius:10px;border:2px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;font-family:inherit">🛵<br/>Porter</button>' +
+    '<button id="cs-btn-Transport" onclick="csSelectMode(this)" data-m="Transport" style="padding:10px 4px;border-radius:10px;border:2px solid var(--border);background:var(--surface);font-size:12px;cursor:pointer;font-family:inherit">🚛<br/>Transport</button>' +
+    '</div>' +
+    '</div>' +
 
-  var invoiceSection =
-    '<div style="margin-bottom:1.25rem">' +
-      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">STEP 1 — INVOICE PHOTO</div>' +
-      (cs.invoiceData ?
-        '<div style="position:relative">' +
-          '<img src="' + cs.invoiceData + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:10px;border:2px solid var(--ok)"/>' +
-          '<div style="color:var(--ok);font-weight:600;font-size:12px;margin-top:4px">✓ Invoice captured</div>' +
-          '<button onclick="S.cs.invoiceData=null;renderCourierEntry()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.5);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>' +
-        '</div>'
-      :
-        '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:64px">' +
-          '<input id="cs-inv-input" type="file" accept="image/*" capture="environment" onchange="csHandleInvoice(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
-          '<span style="font-size:1.8rem;pointer-events:none">📷</span>' +
-          '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Tap to photograph invoice</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">System reads invoice number and customer automatically</div></div>' +
-        '</label>'
-      ) +
+    '<div style="margin-bottom:1rem">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">1 — INVOICE PHOTO</div>' +
+    '<div id="cs-inv-preview" style="display:none;margin-bottom:8px">' +
+      '<img id="cs-inv-img" src="" style="width:100%;max-height:160px;object-fit:contain;border-radius:8px;border:2px solid var(--ok)"/>' +
+      '<div style="font-size:12px;color:var(--ok);font-weight:600;margin-top:4px">✓ Invoice captured</div>' +
+    '</div>' +
+    '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:1rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
+      '<input id="cs-inv-input" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+      '<span style="font-size:1.8rem;pointer-events:none">📷</span>' +
+      '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Tap to photograph invoice</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">OCR reads invoice number automatically</div></div>' +
+    '</label>' +
+    '</div>' +
+
+    '<div style="margin-bottom:1rem">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px" id="cs-slip-label">2 — LR / DOCKET / RECEIPT</div>' +
+    '<div id="cs-slip-preview" style="display:none;margin-bottom:8px">' +
+      '<div id="cs-slip-img-wrap"></div>' +
+      '<div style="font-size:12px;color:var(--ok);font-weight:600;margin-top:4px">✓ Receipt captured</div>' +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:52px">' +
+        '<input id="cs-slip-cam" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+        '<span style="font-size:1.6rem;pointer-events:none">📷</span>' +
+        '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Take photo of receipt</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">Photograph the physical document</div></div>' +
+      '</label>' +
+      '<label style="display:flex;align-items:center;gap:12px;background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:52px">' +
+        '<input id="cs-slip-file" type="file" accept="image/*,application/pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
+        '<span style="font-size:1.6rem;pointer-events:none">📁</span>' +
+        '<div style="pointer-events:none"><div style="font-weight:700;color:var(--text);font-size:14px">Upload from gallery or files</div><div style="font-size:11px;color:var(--text3)">Image or PDF — from WhatsApp also works</div></div>' +
+      '</label>' +
+    '</div>' +
+    '</div>' +
+
+    '<div style="margin-bottom:1rem">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">3 — CUSTOMER CONTACT</div>' +
+    '<input id="cs-mobile" type="tel" placeholder="Customer WhatsApp number" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
+    '<input id="cs-email" type="email" placeholder="Customer email address" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
+    '<input id="cs-date" type="date" placeholder="Expected delivery date" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
+    '</div>' +
+
+    '<button class="btn btn-primary" style="width:100%;font-size:15px" onclick="csPreviewSend()">Preview & Send →</button>' +
+    '<button class="btn btn-outline" style="width:100%;margin-top:8px;font-size:13px" onclick="S.csd=null;showScreen(&quot;dispatch-queue&quot;)">Cancel</button>' +
     '</div>';
 
-  var slipSection =
-    '<div style="margin-bottom:1.25rem">' +
-      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">STEP 2 — ' + slipLabel.toUpperCase() + '</div>' +
-      (cs.slipData ?
-        '<div style="position:relative">' +
-          (cs.slipData.isPdf ?
-            '<div style="background:var(--surface2);border-radius:10px;padding:1rem;display:flex;align-items:center;gap:10px;border:2px solid var(--ok)">' +
-              '<span style="font-size:2rem">📄</span>' +
-              '<div><div style="font-weight:600;font-size:13px">' + escHtml(cs.slipData.name) + '</div><div style="font-size:11px;color:var(--ok)">✓ PDF uploaded</div></div>' +
-            '</div>'
-          :
-            '<img src="' + cs.slipData.dataUrl + '" style="width:100%;max-height:180px;object-fit:contain;border-radius:10px;border:2px solid var(--ok)"/>' +
-            '<div style="color:var(--ok);font-weight:600;font-size:12px;margin-top:4px">✓ Receipt captured</div>'
-          ) +
-          '<button onclick="S.cs.slipData=null;renderCourierEntry()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.5);border:none;color:#fff;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>' +
-        '</div>'
-      :
-        '<div style="display:flex;flex-direction:column;gap:8px">' +
-          '<label style="display:flex;align-items:center;gap:12px;background:var(--accent);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
-            '<input id="cs-slip-cam" type="file" accept="image/*" capture="environment" onchange="csHandleSlip(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
-            '<span style="font-size:1.6rem;pointer-events:none">📷</span>' +
-            '<div style="pointer-events:none"><div style="font-weight:700;color:#fff;font-size:14px">Take photo</div><div style="font-size:11px;color:rgba(255,255,255,0.8)">Photograph the physical ' + (cs.mode==='Transport'?'LR copy':cs.mode==='Porter'?'Porter receipt':'docket slip') + '</div></div>' +
-          '</label>' +
-          '<label style="display:flex;align-items:center;gap:12px;background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;padding:0.85rem 1.25rem;cursor:pointer;position:relative;overflow:hidden;min-height:56px">' +
-            '<input id="cs-slip-file" type="file" accept="image/*,application/pdf" onchange="csHandleSlip(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%"/>' +
-            '<span style="font-size:1.6rem;pointer-events:none">📁</span>' +
-            '<div style="pointer-events:none"><div style="font-weight:700;color:var(--text);font-size:14px">Upload from gallery / files</div><div style="font-size:11px;color:var(--text3)">Image or PDF — forwarded from WhatsApp also works</div></div>' +
-          '</label>' +
-        '</div>'
-      ) +
-    '</div>';
+  // Wire up file inputs after render
+  document.getElementById('cs-inv-input').onchange = function(e) {
+    var file = e.target.files[0]; if (!file) return;
+    var r = new FileReader();
+    r.onload = function(ev) {
+      compressPhoto(ev.target.result, 1200, 0.70).then(function(d) {
+        if (!S.csd) S.csd = {};
+        S.csd.invoiceData = d; S.csd.invoiceFile = file;
+        document.getElementById('cs-inv-img').src = d;
+        document.getElementById('cs-inv-preview').style.display = 'block';
+        // Submit to backend for OCR + auto-fill contact
+        csSubmitInvoice(d, file);
+      });
+    };
+    r.readAsDataURL(file);
+  };
 
-  var pod = cs.pod || {};
-  var isKnown = !!(pod.mobile || pod.email);
-  var contactSection =
-    '<div style="margin-bottom:1.25rem">' +
-      '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">STEP 3 — CUSTOMER CONTACT</div>' +
-      (isKnown ? '<div style="background:var(--ok-soft);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--ok-text);margin-bottom:8px">📒 Saved contact — details auto-filled</div>' : '') +
-      '<div class="field" style="margin-bottom:8px"><input type="tel" id="cs-mobile" value="' + escHtml(pod.mobile||'') + '" placeholder="Customer WhatsApp number" style="font-size:14px"/></div>' +
-      '<div class="field" style="margin-bottom:8px"><input type="email" id="cs-email" value="' + escHtml(pod.email||'') + '" placeholder="Customer email address" style="font-size:14px"/></div>' +
-      '<div class="field"><input type="date" id="cs-date" value="' + escHtml(pod.expectedDate||'') + '" style="font-size:14px"/></div>' +
-    '</div>';
+  function wireSlip(inputId) {
+    var el = document.getElementById(inputId);
+    if (!el) return;
+    el.onchange = function(e) {
+      var file = e.target.files[0]; if (!file) return;
+      var r = new FileReader();
+      r.onload = function(ev) {
+        if (!S.csd) S.csd = {};
+        S.csd.slipData = {dataUrl: ev.target.result, mimeType: file.type, name: file.name, isPdf: file.type === 'application/pdf'};
+        var wrap = document.getElementById('cs-slip-img-wrap');
+        if (file.type === 'application/pdf') {
+          wrap.innerHTML = '<div style="background:var(--surface2);border-radius:8px;padding:1rem;display:flex;align-items:center;gap:10px"><span style="font-size:2rem">📄</span><div><div style="font-weight:600;font-size:13px">' + escHtml(file.name) + '</div></div></div>';
+        } else {
+          wrap.innerHTML = '<img src="' + ev.target.result + '" style="width:100%;max-height:160px;object-fit:contain;border-radius:8px;border:2px solid var(--ok)"/>';
+        }
+        document.getElementById('cs-slip-preview').style.display = 'block';
+      };
+      r.readAsDataURL(file);
+    };
+  }
+  wireSlip('cs-slip-cam');
+  wireSlip('cs-slip-file');
 
-  var canSend = cs.invoiceData && cs.slipData && cs.mode;
-  var sendBtn = canSend ?
-    '<button class="btn btn-primary" style="font-size:15px" onclick="csGoSend()">Preview & Send →</button>' :
-    '<div style="background:var(--surface2);border-radius:10px;padding:0.75rem 1rem;font-size:13px;color:var(--text3);text-align:center">' +
-      (cs.mode ? (cs.invoiceData ? 'Add the ' + slipLabel + ' above to continue' : 'Add invoice photo above to continue') : 'Select shipment type above to start') +
-    '</div>';
+  // Restore previously selected mode
+  if (S.csd && S.csd.mode) csSelectMode(document.getElementById('cs-btn-' + S.csd.mode));
+  // Restore contact fields if returning from preview
+  if (S.csd && S.csd.mobile) document.getElementById('cs-mobile').value = S.csd.mobile;
+  if (S.csd && S.csd.email)  document.getElementById('cs-email').value  = S.csd.email;
+  if (S.csd && S.csd.date)   document.getElementById('cs-date').value   = S.csd.date;
+  // Restore previews
+  if (S.csd && S.csd.invoiceData) {
+    document.getElementById('cs-inv-img').src = S.csd.invoiceData;
+    document.getElementById('cs-inv-preview').style.display = 'block';
+  }
+  if (S.csd && S.csd.slipData) {
+    var wrap = document.getElementById('cs-slip-img-wrap');
+    if (S.csd.slipData.isPdf) {
+      wrap.innerHTML = '<div style="background:var(--surface2);border-radius:8px;padding:1rem;display:flex;align-items:center;gap:10px"><span style="font-size:2rem">📄</span><div><div style="font-weight:600;font-size:13px">' + escHtml(S.csd.slipData.name) + '</div></div></div>';
+    } else {
+      wrap.innerHTML = '<img src="' + S.csd.slipData.dataUrl + '" style="width:100%;max-height:160px;object-fit:contain;border-radius:8px;border:2px solid var(--ok)"/>';
+    }
+    document.getElementById('cs-slip-preview').style.display = 'block';
+  }
+}
 
-  c.innerHTML = '<div style="padding-bottom:1rem">' + modeBar + invoiceSection + (cs.mode && cs.invoiceData ? slipSection : '') + (cs.mode && cs.invoiceData && cs.slipData ? contactSection : '') + sendBtn + '</div>';
-  // CRITICAL: clear file inputs after render so Android doesn't cache the previous file
-  // and re-fire the same file when the next input is tapped
-  ['cs-inv-input','cs-slip-cam','cs-slip-file'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) { try { el.value = ''; } catch(e) {} }
+function csSelectMode(btn) {
+  document.querySelectorAll('#cs-mode-grid button').forEach(function(b) {
+    b.style.border = '2px solid var(--border)';
+    b.style.background = 'var(--surface)';
+    b.style.fontWeight = '500';
   });
+  if (btn) {
+    btn.style.border = '2px solid var(--info)';
+    btn.style.background = 'var(--info-soft)';
+    btn.style.fontWeight = '700';
+    var mode = btn.getAttribute('data-m') || btn.dataset.m;
+    if (!S.csd) S.csd = {};
+    S.csd.mode = mode;
+    var labels = {Courier:'Courier Docket / AWB Slip', Porter:'Porter Receipt / Booking ID', Transport:'LR / Consignment Note'};
+    var lbl = document.getElementById('cs-slip-label');
+    if (lbl) lbl.textContent = '2 — ' + (labels[mode] || 'Receipt').toUpperCase();
+  }
 }
 
-function csSetMode(mode) { if (!S.cs) S.cs = {}; S.cs.mode = mode; renderCourierEntry(); }
-
-function csHandleInvoice(event) {
-  var file = event.target.files[0];
-  if (!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    compressPhoto(e.target.result, 1200, 0.70).then(function(dataUrl) {
-      if (!S.cs) S.cs = {};
-      S.cs.invoiceData = dataUrl;
-      renderCourierEntry();
-      // Submit to backend for OCR
-      if (!hasBackend()) return;
-      var id = generateId();
-      S.cs.pod = {id:id, firm:S.user.firm||'Firm 1', invoice:'', customer:'', mobile:'', email:'',
-        mode:S.cs.mode, dispatchDate:new Date().toISOString().slice(0,10), expectedDate:''};
-      sheetPost({action:'submitPOD', id:id, submittedAt:new Date().toISOString(),
-        driverName:S.user.name, driverMobile:S.user.mobile||'', firm:S.user.firm||'Firm 1',
-        invoiceNo:'', customer:'', mobile:'', email:'', mode:S.cs.mode,
-        dispatchDate:new Date().toISOString().slice(0,10), expectedDate:'',
-        docket:'', aiConfidence:'processing',
-        photoBase64:dataUrl.split(',')[1],
-        photoMimeType:dataUrl.split(';')[0].split(':')[1]});
-      showToast('Invoice uploaded — reading details...');
-      // After OCR delay, fetch back enriched pod
-      setTimeout(function() {
-        if (!S.cs || !S.cs.pod) return;
-        fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
-          {method:'GET',redirect:'follow'}, 15000)
-        .then(function(r) { return r.text(); })
-        .then(function(t) {
-          var data = JSON.parse(t);
-          if (data.success && data.pods) {
-            var found = data.pods.find(function(p) { return p.id === id; });
-            if (found) {
-              S.cs.pod = found;
-              // Check local pods cache for saved contact
-              if (!found.mobile && !found.email && found.customer) {
-                var prev = S.pods.find(function(p) {
-                  return p.id !== found.id && p.customer &&
-                    p.customer.toLowerCase().trim() === found.customer.toLowerCase().trim() &&
-                    (p.mobile || p.email);
-                });
-                if (prev) { S.cs.pod.mobile = prev.mobile||''; S.cs.pod.email = prev.email||''; }
-              }
-              renderCourierEntry();
-            }
-          }
-        }).catch(function(){});
-      }, 8000);
-    });
-  };
-  reader.readAsDataURL(file);
+function csSubmitInvoice(dataUrl, file) {
+  if (!hasBackend() || !S.csd) return;
+  var id = generateId();
+  S.csd.podId = id;
+  showToast('Invoice uploaded — reading details...');
+  sheetPost({
+    action:'submitPOD', id:id, submittedAt:new Date().toISOString(),
+    driverName:S.user.name, driverMobile:S.user.mobile||'',
+    firm:S.user.firm||'Firm 1', invoiceNo:'', customer:'', mobile:'', email:'',
+    mode:S.csd.mode||'Courier',
+    dispatchDate:new Date().toISOString().slice(0,10),
+    expectedDate:'', docket:'', aiConfidence:'processing',
+    photoBase64:dataUrl.split(',')[1],
+    photoMimeType:dataUrl.split(';')[0].split(':')[1]
+  });
+  // Fetch OCR result after delay and auto-fill contact
+  setTimeout(function() {
+    if (!S.csd || !S.csd.podId) return;
+    fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
+      {method:'GET',redirect:'follow'}, 15000)
+    .then(function(r){return r.text();})
+    .then(function(t){
+      var data = JSON.parse(t);
+      if (!data.success || !data.pods) return;
+      var pod = data.pods.find(function(p){return p.id===S.csd.podId;});
+      if (!pod) return;
+      S.csd.pod = pod;
+      // Auto-fill contact if found in address book
+      var mobileEl = document.getElementById('cs-mobile');
+      var emailEl  = document.getElementById('cs-email');
+      if (mobileEl && !mobileEl.value && pod.mobile) mobileEl.value = pod.mobile;
+      if (emailEl  && !emailEl.value  && pod.email)  emailEl.value  = pod.email;
+      if (pod.mobile || pod.email) showToast('📒 Contact auto-filled from address book');
+    }).catch(function(){});
+  }, 8000);
 }
 
-function csHandleSlip(event) {
-  var file = event.target.files[0];
-  if (!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    if (!S.cs) S.cs = {};
-    S.cs.slipData = {dataUrl:e.target.result, mimeType:file.type, name:file.name, isPdf:file.type==='application/pdf'};
-    renderCourierEntry();
-  };
-  reader.readAsDataURL(file);
-}
-
-function csGoSend() {
-  var mobile = (document.getElementById('cs-mobile')||{}).value||'';
-  var email  = (document.getElementById('cs-email') ||{}).value||'';
-  var date   = (document.getElementById('cs-date')  ||{}).value||'';
-  if (!mobile && !email) { showToast('Please enter customer mobile or email'); return; }
-  if (!S.cs.pod) S.cs.pod = {};
-  S.cs.pod.mobile = mobile.trim();
-  S.cs.pod.email  = email.trim();
-  S.cs.pod.expectedDate = date;
-  if ((mobile||email) && hasBackend()) {
-    sheetPost({action:'updatePodDetails', id:S.cs.pod.id||'', mobile:mobile.trim(),
-      email:email.trim(), customer:S.cs.pod.customer||'', updatedBy:S.user.name});
+function csPreviewSend() {
+  if (!S.csd) S.csd = {};
+  S.csd.mobile = (document.getElementById('cs-mobile')||{}).value||'';
+  S.csd.email  = (document.getElementById('cs-email') ||{}).value||'';
+  S.csd.date   = (document.getElementById('cs-date')  ||{}).value||'';
+  if (!S.csd.invoiceData) { showToast('Please photograph the invoice first'); return; }
+  if (!S.csd.slipData)    { showToast('Please add the ' + (S.csd.mode==='Transport'?'LR copy':S.csd.mode==='Porter'?'Porter receipt':'docket slip') + ' first'); return; }
+  if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
+  // Save contact to address book
+  if ((S.csd.mobile || S.csd.email) && hasBackend() && S.csd.podId) {
+    sheetPost({action:'updatePodDetails', id:S.csd.podId,
+      mobile:S.csd.mobile, email:S.csd.email,
+      customer:(S.csd.pod&&S.csd.pod.customer)||'', updatedBy:S.user.name});
   }
   renderCourierSend();
 }
+
+// Compatibility stubs
+function csSetMode(m) { var btn=document.getElementById('cs-btn-'+m); if(btn) csSelectMode(btn); else { if(!S.csd)S.csd={}; S.csd.mode=m; } }
+function courierNextStep(){}
+function courierPrevStep(){}
+function resetCourierSession(){S.csd=null;renderCourierEntry();}
+function courierDone(){S.csd=null;showScreen('dispatch-queue');}
+function handleSlipFile(e){var el=document.getElementById('cs-slip-cam');if(el&&el.onchange)el.onchange(e);}
+function handleCourierInvoicePhoto(e){var el=document.getElementById('cs-inv-input');if(el&&el.onchange)el.onchange(e);}
+function courierGoToReview(){csPreviewSend();}
+
 
 function renderCourierSend() {
   var cs = S.cs; var pod = cs.pod || {};
@@ -2892,14 +2915,6 @@ function renderCourierSend() {
 
 
 // Keep old function names working
-function setCourierMode(m) { csSetMode(m); }
-function courierNextStep() {}
-function courierPrevStep() {}
-function resetCourierSession() { S.cs=null; renderCourierEntry(); }
-function courierDone() { S.cs=null; showScreen('dispatch-queue'); }
-function handleSlipFile(e) { csHandleSlip(e); }
-function handleCourierInvoicePhoto(e) { csHandleInvoice(e); }
-function courierGoToReview() { csGoSend(); }
 
 function sendCourierWA(target) {
   var el = document.getElementById('wa-preview-courier');
