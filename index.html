@@ -2927,11 +2927,14 @@ function csPreviewSend() {
   if (!S.csd.invoiceData) { showToast('Please photograph the invoice first'); return; }
   if (!S.csd.slipData)    { showToast('Please add the ' + (S.csd.mode==='Transport'?'LR copy':S.csd.mode==='Porter'?'Porter receipt':'docket slip') + ' first'); return; }
   if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
-  // Save contact to address book
+  // Save contact to address book — send invoiceNo so it can be keyed
+  // even when OCR hasn't returned the customer name yet
   if ((S.csd.mobile || S.csd.email) && hasBackend() && S.csd.podId) {
     sheetPost({action:'updatePodDetails', id:S.csd.podId,
       mobile:S.csd.mobile, email:S.csd.email,
-      customer:(S.csd.pod&&S.csd.pod.customer)||'', updatedBy:S.user.name});
+      invoiceNo: S.csd.invoiceNo || (S.csd.pod && S.csd.pod.invoice) || '',
+      customer:(S.csd.pod&&S.csd.pod.customer)||S.csd.customer||'',
+      updatedBy:S.user.name});
   }
   renderCourierSend();
 }
