@@ -657,36 +657,6 @@ async function sheetPost(payload) {
   }
 }
 
-// Readable POST — same simple-request pattern as ocrImage (text/plain body, no
-// preflight). Use when the caller must see the backend's reply (emailSent, match).
-// The request is NEVER retried via no-cors: if the read fails, the server may
-// already have acted (e.g. sent an email), so we report "unconfirmed" instead.
-async function sheetPostRead(payload, timeoutMs) {
-  if (!hasBackend()) return {success: false, offline: true, error: 'No backend connected'};
-  const secret = localStorage.getItem('arora_api_secret') || '';
-  try {
-    const res = await fetchWithTimeout(S.backendUrl, {
-      method: 'POST',
-      mode: 'cors',
-      redirect: 'follow',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({...payload, apiSecret: secret}),
-    }, timeoutMs || 60000);
-    const text = await res.text();
-    try { return JSON.parse(text); }
-    catch(e) { return {success: false, unconfirmed: true, error: 'Unreadable server response'}; }
-  } catch(err) {
-    console.error('sheetPostRead error:', err.name, err.message);
-    return {success: false, unconfirmed: true, unreachable: true, error: err.message};
-  }
-}
-
-// Message for a sendAlert result that is NOT a confirmed send
-function emailFailMsg(res) {
-  if (res && res.unconfirmed) return '⚠ Could not confirm email (' + (res.error || 'no response') + ') — check the Alerts sheet before resending';
-  return '⚠ Email failed: ' + ((res && res.error) || 'unknown error');
-}
-
 function setSyncStatus(status) {
   S.syncStatus = status;
   const el = document.getElementById('sync-indicator');
@@ -764,18 +734,6 @@ function openLightbox(url) {
   LB.scale = 1; LB.x = 0; LB.y = 0;
   applyLightboxTransform();
   overlay.classList.add('open');
-}
-
-// Quote-safe onclick refs: store the value in a module-level array and pass only the
-// numeric index in the onclick attribute (URLs/names with apostrophes can't break it).
-function photoRef(url) {
-  if (!S._photoRefs) S._photoRefs = [];
-  if (S._photoRefs.length > 500) S._photoRefs = [];
-  S._photoRefs.push(url);
-  return S._photoRefs.length - 1;
-}
-function openLightboxRef(idx) {
-  openLightbox(S._photoRefs && S._photoRefs[idx]);
 }
 
 function closeLightbox() {
@@ -1325,14 +1283,10 @@ function statusBadgeHtml(status, review) {
   if (status === 'approved')   return '<span class="badge badge-ok">✓ Approved' + by + '</span>';
   if (status === 'incomplete') return '<span class="badge badge-warn">⚠ Incomplete' + by + '</span>';
   if (status === 'pending')    return '<span class="badge badge-err">● Pending review</span>';
-  if (status === 'Alerted')    return '<span class="badge badge-grey">✉ Alerted</span>';
   return '<span class="badge badge-grey">Unknown</span>';
 }
-// Courier / Porter / Transport rows are "Alerted" — they skip the review queue entirely.
-// Review is only for own-fleet deliveries with a signed POD photo.
-function isAlertedPod(p) { return !!(p && (p.isAlerted === true || p.status === 'Alerted')); }
-function pendingPods() { return S.pods.filter(p => !isAlertedPod(p) && p.status === 'pending' && p.aiStatus !== 'unclear' && p.aiStatus !== 'processing'); }
-function escalatedPods() { return S.pods.filter(p => !isAlertedPod(p) && escalationLevel(p) !== 'ok' && escalationLevel(p) !== 'pending' && p.status !== 'approved'); }
+function pendingPods() { return S.pods.filter(p => p.status === 'pending' && p.aiStatus !== 'unclear' && p.aiStatus !== 'processing'); }
+function escalatedPods() { return S.pods.filter(p => escalationLevel(p) !== 'ok' && escalationLevel(p) !== 'pending' && p.status !== 'approved'); }
 function canReview() { return S.user && (S.user.role === 'dispatch' || S.user.role === 'management'); }
 
 function showToast(msg, duration=2500) {
@@ -1358,7 +1312,7 @@ function setNavActive(navId, btnId) {
 }
 
 function unclearPods() {
-  return S.pods.filter(p => !isAlertedPod(p) && (p.aiStatus === 'unclear' || (p.aiStatus === 'processing' && (Date.now() - p.ts) > 30000)));
+  return S.pods.filter(p => p.aiStatus === 'unclear' || (p.aiStatus === 'processing' && (Date.now() - p.ts) > 30000));
 }
 
 function updateBadges() {
@@ -1731,32 +1685,23 @@ async function doLogin() {
 }
 
 async function verifyRolePassword(role, firm, pw) {
-  // ALWAYS verify with the server first. The device-local cached hash is only a
-  // fallback for when the server cannot be reached, and it is only ever written
-  // after a successful server verification — never on first entry.
+  // sheetPost uses no-cors mode so response body is never readable.
+  // Password verification uses locally cached hashes only.
+  // Hash is stored on first login from a device that knows the password.
   const cacheKey = 'arora_pw_hash_' + role + '_' + (firm||'mgmt');
   const cached = localStorage.getItem(cacheKey);
-  if (hasBackend()) {
-    const res = await sheetPostRead({action:'verifyPassword', role, firm, password:pw}, 15000);
-    const serverAnswer = res && (typeof res.match === 'boolean' ? res.match
-                       : typeof res.valid === 'boolean' ? res.valid
-                       : typeof res.verified === 'boolean' ? res.verified : undefined);
-    if (typeof serverAnswer === 'boolean') {
-      if (serverAnswer) localStorage.setItem(cacheKey, simpleHash(pw));
-      else if (cached === simpleHash(pw)) localStorage.removeItem(cacheKey); // password changed on server
-      return serverAnswer;
-    }
-    // Server unreachable / unreadable → offline fallback to cached hash
-    if (cached) {
-      showToast('Offline — password checked against this device');
-      return cached === simpleHash(pw);
-    }
-    showToast('Cannot reach server to verify password — check connection');
-    return false;
+  if (cached) {
+    const match = cached === simpleHash(pw);
+    if (!match) return false;
+    return true;
   }
-  // No backend configured (demo mode): only a previously verified hash can be used
-  if (cached) return cached === simpleHash(pw);
-  showToast('Warning: No backend — password not verified (demo mode)');
+  // First time on this device - store the hash and allow entry.
+  // The password will be validated against the Sheet passively in background.
+  localStorage.setItem(cacheKey, simpleHash(pw));
+  // Fire-and-forget verify in background (can't read response due to no-cors)
+  if (hasBackend()) {
+    sheetPost({action:'verifyPassword', role, firm, password:pw}).catch(()=>{});
+  }
   return true;
 }
 
@@ -1790,9 +1735,8 @@ async function renderContacts() {
   }
 
   S._contactsCache = customers; // cache for editContactByIdx
-  S._contactRefs = customers;    // index-based refs for onclick (quote-safe)
   const rows = customers.map((cu, idx) => `
-    <div class="pod-item" style="cursor:pointer" onclick="editContactByIdx(${idx})" data-idx="${idx}">
+    <div class="pod-item" style="cursor:pointer" onclick="editContactByIdx(${customers.indexOf(cu)})" data-idx="${customers.indexOf(cu)}">>
       <div class="pod-icon fleet" style="background:var(--info-soft);color:var(--info-text);font-size:1.4rem">👤</div>
       <div class="pod-meta" style="flex:1">
         <div class="pod-inv">${escHtml(cu.name||'—')}</div>
@@ -1815,14 +1759,11 @@ async function renderContacts() {
 }
 
 function editContactByIdx(idx) {
-  const cu = S._contactRefs && S._contactRefs[idx];
+  const cu = S._contactsCache && S._contactsCache[idx];
   if (cu) editContact(cu);
 }
 
 function editContact(cu) {
-  if (!S._contactRefs) S._contactRefs = [];
-  let refIdx = S._contactRefs.indexOf(cu);
-  if (refIdx < 0) { S._contactRefs.push(cu); refIdx = S._contactRefs.length - 1; }
   document.getElementById('edit-modal-title').textContent = 'Edit contact — ' + (cu.name||'');
   document.getElementById('edit-modal-body').innerHTML = `
     <div style="font-size:12px;color:var(--text3);margin-bottom:1rem">Changes apply to all future deliveries to this customer.</div>
@@ -1841,17 +1782,11 @@ function editContact(cu) {
     </div>
     <div class="btn-group" style="margin-top:0.75rem">
       <button class="btn btn-outline" onclick="document.getElementById('edit-modal').classList.remove('open')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveContactByIdx(${refIdx})">Save →</button>
+      <button class="btn btn-primary" onclick="saveContact('${escHtml(cu.name||'')}')">Save →</button>
     </div>
     <div style="height:1rem"></div>
   `;
   document.getElementById('edit-modal').classList.add('open');
-}
-
-function saveContactByIdx(idx) {
-  const cu = S._contactRefs && S._contactRefs[idx];
-  if (!cu) { showToast('Contact not found — reopen and try again'); return; }
-  saveContact(cu.name || '');
 }
 
 async function saveContact(customerName) {
@@ -2455,7 +2390,7 @@ function renderReviewModal(pod) {
   body.innerHTML = `
     ${getBestPhotoUrl(pod) ? `
       <div style="position:relative;margin-bottom:1rem">
-        <img src="${getBestPhotoUrl(pod)}" class="photo-preview" style="max-height:220px" alt="Invoice photo" onclick="openLightboxRef(${photoRef(getBestPhotoUrl(pod))})"/>
+        <img src="${getBestPhotoUrl(pod)}" class="photo-preview" style="max-height:220px" alt="Invoice photo" onclick="openLightbox('${getBestPhotoUrl(pod).replace(/'/g,"&#39;")}')"/>
         ${S.user.role === 'management' ? `
           <div style="display:flex;gap:6px;margin-top:6px">
             <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:7px;background:var(--warn-soft);border:1.5px solid var(--warn);border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--warn-text);position:relative;overflow:hidden">
@@ -2544,82 +2479,12 @@ function renderReviewModal(pod) {
     <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
       <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Send dispatch alert to customer</div>
       <div style="display:flex;gap:8px">
-        ${pod.mobile ? `<button class="wa-btn" style="flex:1;font-size:13px" onclick="buildReviewModalWA(S.reviewingId)">WhatsApp →</button>` : '<button class="btn btn-outline" style="flex:1;font-size:13px;opacity:0.5" disabled>No mobile</button>'}
-        ${pod.email ? `<button class="btn btn-primary" style="flex:1;font-size:13px" onclick="sendReviewModalEmail(S.reviewingId)">Email →</button>` : '<button class="btn btn-outline" style="flex:1;font-size:13px;opacity:0.5" disabled>No email</button>'}
+        ${pod.mobile ? `<button class="wa-btn" style="flex:1;font-size:13px" onclick="openWhatsApp('${pod.mobile}', buildReviewModalWA(pod))">WhatsApp →</button>` : '<button class="btn btn-outline" style="flex:1;font-size:13px;opacity:0.5" disabled>No mobile</button>'}
+        ${pod.email ? `<button class="btn btn-primary" style="flex:1;font-size:13px" onclick="sendReviewModalEmail(pod)">Email →</button>` : '<button class="btn btn-outline" style="flex:1;font-size:13px;opacity:0.5" disabled>No email</button>'}
       </div>
     </div>` : ''}
     <div style="height:1rem"></div>
   `;
-}
-
-// ── Review popup: dispatch alert actions ──────────────────────
-// Builds the same message as the courier screen and opens wa.me for the customer.
-function buildReviewModalWA(podId) {
-  const pod = S.pods.find(p => p.id === podId);
-  if (!pod) { showToast('POD not found'); return ''; }
-  if (!pod.mobile) { showToast('No customer mobile number'); return ''; }
-  const firmName = (pod.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
-  const mode     = pod.mode || '';
-  const expLine  = pod.expectedDate ? new Date(pod.expectedDate).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '';
-  const customTpl = localStorage.getItem('arora_msg_template') || '';
-  let waText;
-  if (customTpl) {
-    waText = customTpl.replace(/{customer}/g, pod.customer || 'Customer').replace(/{firm}/g, firmName)
-      .replace(/{mode}/g, mode).replace(/{invoice}/g, pod.invoice || '—').replace(/{delivery}/g, expLine || '—')
-      .replace(/{docket}/g, pod.docket || '—').replace(/{sender}/g, S.user ? S.user.name : '');
-  } else {
-    waText = [
-      'Dear ' + (pod.customer || 'Customer') + ',',
-      '',
-      'Your order from ' + firmName + ' has been dispatched via ' + mode + '.',
-      '',
-      'Invoice No.: ' + (pod.invoice || '—'),
-      pod.docket ? 'Docket / AWB: ' + pod.docket : null,
-      'Please refer to the attached receipt for tracking details.',
-      expLine ? 'Expected delivery: ' + expLine : null,
-      '',
-      'Please ensure someone is available to receive and sign.',
-      '',
-      'Contact: ' + (S.user ? S.user.name : '') + ' | ' + firmName
-    ].filter(l => l !== null).join('\n');
-  }
-  openWhatsApp(pod.mobile, waText);
-  if (hasBackend()) {
-    sheetPost({action:'markWASent', podId: pod.id || '', invoiceNo: pod.invoice || '', sentBy: S.user ? S.user.name : ''});
-  }
-  pod.alertWASent = true;
-  return waText;
-}
-
-async function sendReviewModalEmail(podId) {
-  const pod = S.pods.find(p => p.id === podId);
-  if (!pod) { showToast('POD not found'); return; }
-  if (!pod.email) { showToast('No customer email address'); return; }
-  if (!hasBackend()) { showToast('No backend connected'); return; }
-  if (!confirm('Send email to ' + pod.email + '?')) return;
-  const btn = document.querySelector('[onclick*="sendReviewModalEmail"]');
-  if (btn) { btn.textContent = '⏳ Sending...'; btn.disabled = true; }
-  const res = await sheetPostRead({
-    action:       'sendAlert',
-    podId:        pod.id || '',
-    firm:         pod.firm || (S.user && S.user.firm) || 'Firm 1',
-    invoiceNo:    pod.invoice || '',
-    customer:     pod.customer || '',
-    mobile:       pod.mobile || '',
-    email:        pod.email,
-    mode:         pod.mode || '',
-    docket:       pod.docket || '',
-    expectedDate: pod.expectedDate || '',
-    sentBy:       S.user ? S.user.name : '',
-    invoicePhotoUrl: pod.photoUrl || '',
-  });
-  if (btn) { btn.textContent = 'Email →'; btn.disabled = false; }
-  if (res && res.success && res.emailSent === true) {
-    pod.alertEmailSent = true;
-    showToast('✓ Email sent to ' + pod.email);
-  } else {
-    showToast(emailFailMsg(res));
-  }
 }
 
 function rcItemHtml(key, icon, label) {
@@ -2958,19 +2823,13 @@ function renderCourierEntry() {
       e.target.value = '';
       if (!S.csd) S.csd = {};
       if (!S.csd.packPhotos) S.csd.packPhotos = [];
-      // Enforce the 5-photo limit BEFORE the async readers run — packPhotos.length
-      // only grows inside onload, so checking it inside the loop lets extras through.
-      var remaining = Math.max(0, 5 - S.csd.packPhotos.length);
-      if (files.length > remaining) {
-        showToast(remaining === 0 ? 'Maximum 5 packing photos allowed'
-          : 'Only ' + remaining + ' more photo(s) allowed — ' + (files.length - remaining) + ' skipped');
-      }
-      files = files.slice(0, remaining);
       files.forEach(function(file) {
+        if (S.csd.packPhotos.length >= 5) {
+          showToast('Maximum 5 packing photos allowed'); return;
+        }
         var r = new FileReader();
         r.onload = function(ev) {
           compressPhoto(ev.target.result, 1200, 0.70).then(function(d) {
-            if (S.csd.packPhotos.length >= 5) return;
             S.csd.packPhotos.push({dataUrl: d, mimeType: file.type, name: file.name});
             renderPackGrid();
             saveCsdSession();
@@ -3053,7 +2912,7 @@ function csSelectMode(btn) {
     saveCsdSession();
     var labels = {Courier:'Courier Docket / AWB Slip', Porter:'Porter Receipt / Booking ID', Transport:'LR / Consignment Note'};
     var lbl = document.getElementById('cs-slip-label');
-    if (lbl) lbl.textContent = '3 — ' + (labels[mode] || 'LR / Docket / Receipt').toUpperCase();
+    if (lbl) lbl.textContent = '2 — ' + (labels[mode] || 'Receipt').toUpperCase();
   }
 }
 
@@ -3100,11 +2959,8 @@ function loadCsdSession() {
 
 function csSubmitInvoice(dataUrl, file) {
   if (!hasBackend() || !S.csd) return;
-  // Generate the POD id ONCE per courier session — reused for OCR polling and
-  // for every sendAlert call, so pressing Email twice never creates a second row.
-  if (!S.csd.podId) S.csd.podId = generateId();
-  var id = S.csd.podId;
-  saveCsdSession();
+  var id = generateId();
+  S.csd.podId = id;  // used as a temporary reference ID for OCR polling
   showToast('Invoice uploaded — reading details...');
   // Use 'ocrInvoice' action — this uploads the photo and runs OCR
   // but does NOT create a row in the PODs sheet.
@@ -3365,28 +3221,24 @@ function renderCourierSend() {
   var expLine = csd.date ? new Date(csd.date).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'}) : '';
 
   var invoiceNo = csd.invoiceNo || pod.invoice || '—';
-  var custName  = pod.customer || csd.customer || 'Customer';
   var customTpl = localStorage.getItem('arora_msg_template') || '';
   var waText;
   if (customTpl) {
-    waText = customTpl.replace(/{customer}/g, custName).replace(/{firm}/g,firmName).replace(/{mode}/g,mode).replace(/{invoice}/g,invoiceNo).replace(/{delivery}/g,expLine||'—').replace(/{docket}/g,csd.docket||'—').replace(/{sender}/g,S.user?S.user.name:'');
+    waText = customTpl.replace(/{customer}/g, pod.customer||'Customer').replace(/{firm}/g,firmName).replace(/{mode}/g,mode).replace(/{invoice}/g,invoiceNo).replace(/{delivery}/g,expLine||'—').replace(/{sender}/g,S.user?S.user.name:'');
   } else {
   var waLines = [
-    'Dear ' + custName + ',',
+    'Dear ' + (pod.customer || 'Customer') + ',',
     '',
     'Your order from ' + firmName + ' has been dispatched via ' + mode + '.',
     '',
     'Invoice No.: ' + (csd.invoiceNo || pod.invoice || '—'),
-    csd.docket ? 'Docket / AWB: ' + csd.docket : null,
     'Please refer to the attached receipt for tracking details.',
-    expLine ? 'Expected delivery: ' + expLine : null,
+    expLine ? 'Expected delivery: ' + expLine : '',
     '',
     'Please ensure someone is available to receive and sign.',
     '',
     'Contact: ' + (S.user ? S.user.name : '') + ' | ' + firmName
   ];
-  // Drop omitted optional lines (docket / delivery)
-  waLines = waLines.filter(function(l) { return l !== null; });
   waText = waLines.filter(function(l, i) { return !(l === '' && waLines[i-1] === ''); }).join('\n');
   }
 
@@ -3495,9 +3347,9 @@ async function sendCourierEmail() {
   });
 
   var invoiceNo = csd.invoiceNo || pod.invoice || '';
-  var res = await sheetPostRead({
+  var res = await sheetPost({
     action:'sendAlert',
-    podId:        S.csd && S.csd.podId ? S.csd.podId : (pod.id || ''),
+    podId:        pod.id || '',
     firm:         pod.firm || S.user.firm || 'Firm 1',
     invoiceNo:    invoiceNo,
     customer:     pod.customer || csd.customer || '',
@@ -3517,12 +3369,7 @@ async function sendCourierEmail() {
   });
 
   if (btn) { btn.textContent = '✉ Email → ' + email; btn.disabled = false; }
-  if (res && res.success && res.emailSent === false) {
-    // Backend reached, row saved, but Gmail failed — do NOT record as sent
-    showToast(emailFailMsg(res));
-    return;
-  }
-  if (res && res.success && res.emailSent === true) {
+  if (res && res.success) {
     showToast('✓ Email sent' + (packPhotos.length ? ' with ' + packPhotos.length + ' packing photo(s)' : ''));
     // Save/update contact now — we have confirmed customer name, mobile, email
     if (hasBackend() && (csd.mobile || email)) {
@@ -3542,17 +3389,16 @@ async function sendCourierEmail() {
       var newPod = {
         id:            S.csd.podId,
         invoice:       S.csd.invoiceNo || '',
-        customer:      (S.csd.pod && S.csd.pod.customer) || S.csd.customer || '',
+        customer:      S.csd.customer  || '',
         mobile:        S.csd.mobile    || '',
         email:         email,
         mode:          S.csd.mode      || 'Courier',
         firm:          S.user ? (S.user.firm||'Firm 1') : 'Firm 1',
-        dispatchDate:  toLocalDate(new Date()),
+        dispatchDate:  new Date().toISOString().slice(0,10),
         expectedDate:  S.csd.date      || '',
         docket:        S.csd.docket    || '',
         aiConfidence:  'high',
         status:        'Alerted',
-        isAlerted:     true,
         alertEmailSent: true,
         alertWASent:    false,
       };
@@ -3562,7 +3408,7 @@ async function sendCourierEmail() {
       S.pods.unshift(newPod);
     }
   } else {
-    showToast(emailFailMsg(res));
+    showToast('⚠ Email failed — check connection');
   }
 }
 
@@ -3616,23 +3462,10 @@ var S_batch = {
   items: [],       // filtered pods with editable contact fields
   sending: false,
   sentCount: 0,
-  waQueue: null,   // frozen list for one-by-one WhatsApp session (see batchSendWhatsApp)
 };
-
-// Normalise any date value (yyyy-MM-dd string, ISO UTC timestamp, Date) to the
-// LOCAL calendar date yyyy-MM-dd. Sheets returns dates as UTC ISO strings, e.g.
-// "2026-10-02T18:30:00Z" for 3 Oct IST, which breaks plain string comparison.
-function toLocalDate(v) {
-  if (!v) return '';
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v; // already a plain date
-  var d = new Date(v);
-  if (isNaN(d)) return String(v).slice(0,10);
-  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-}
 
 function renderBatchAlerts() {
   setNavActive('nav-dispatch', 'nav-batch');
-  S_batch.waQueue = null; // any re-render ends a one-by-one WhatsApp session
   var c = document.getElementById('main-content');
 
   // Default date range: today
@@ -3647,7 +3480,7 @@ function renderBatchAlerts() {
   // Filter pods: courier/transport/porter only, within date range, not yet sent
   var filtered = S.pods.filter(function(p) {
     if (p.mode !== 'Courier' && p.mode !== 'Transport' && p.mode !== 'Porter') return false;
-    var d = toLocalDate(p.dispatchDate) || toLocalDate(p.ts);
+    var d = p.dispatchDate || p.ts && new Date(p.ts).toISOString().slice(0,10) || '';
     return d >= S_batch.dateFrom && d <= S_batch.dateTo;
   });
 
@@ -3817,7 +3650,7 @@ async function batchSendEmail() {
     var firmName = (it.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
 
     try {
-      var res = await sheetPostRead({
+      var res = await sheetPost({
         action:'sendAlert',
         podId:       it.id,
         firm:        it.firm,
@@ -3829,16 +3662,14 @@ async function batchSendEmail() {
         docket:      pod.docket || '',
         expectedDate: pod.expectedDate || '',
         sentBy:      S.user.name,
-        // Backend fetches this Drive file and attaches it (no re-upload)
-        invoicePhotoUrl: pod.photoUrl || '',
       });
 
-      if (res && res.success && res.emailSent === true) {
+      if (res && res.success) {
         it.emailSent = true;
         S_batch.sentCount++;
         showToast('✓ Sent to ' + escHtml(it.customer || it.email) + ' (' + S_batch.sentCount + '/' + toSend.length + ')');
       } else {
-        showToast('⚠ Failed: ' + escHtml(it.email) + (res && res.error ? ' — ' + escHtml(res.error) : ''));
+        showToast('⚠ Failed: ' + escHtml(it.email));
       }
     } catch(e) {
       showToast('⚠ Error sending to ' + escHtml(it.email));
@@ -3852,19 +3683,13 @@ async function batchSendEmail() {
 
   S_batch.sending = false;
   renderBatchAlerts();
-  showToast((S_batch.sentCount === toSend.length ? '✓ All emails sent (' : '⚠ Emails sent (') + S_batch.sentCount + ' of ' + toSend.length + ')');
+  showToast('✓ All emails sent (' + S_batch.sentCount + ' of ' + toSend.length + ')');
 }
 
 function batchSendWhatsApp(idx) {
-  // Freeze the queue at the start of the session. Rebuilding it with filter() on
-  // every call shifts indices (the item just sent drops out) and skips customers.
-  if (idx === 0 || !S_batch.waQueue) {
-    S_batch.waQueue = S_batch.items.filter(function(it){ return it.selected && it.mobile && !it.waSent; });
-    idx = 0;
-  }
-  var toSend = S_batch.waQueue;
-  if (toSend.length === 0) { S_batch.waQueue = null; showToast('No WhatsApp numbers to send to'); return; }
-  if (idx >= toSend.length) { S_batch.waQueue = null; showToast('All WhatsApp messages opened ✓'); return; }
+  var toSend = S_batch.items.filter(function(it){ return it.selected && it.mobile && !it.waSent; });
+  if (toSend.length === 0) { showToast('No WhatsApp numbers to send to'); return; }
+  if (idx >= toSend.length) { showToast('All WhatsApp messages opened ✓'); return; }
 
   var it = toSend[idx];
   var firmName = (it.firm || 'Firm 1') === 'Firm 2' ? 'Arora Industrial Traders Pvt Ltd' : 'Arora Enterprises';
@@ -3877,13 +3702,11 @@ function batchSendWhatsApp(idx) {
       .replace(/{mode}/g, it.mode || '')
       .replace(/{invoice}/g, it.invoice || '—')
       .replace(/{delivery}/g, it.date || '—')
-      .replace(/{docket}/g, it.docket || '—')
       .replace(/{sender}/g, S.user ? S.user.name : '');
   } else {
     waText = 'Dear ' + (it.customer || 'Customer') + ',\n\n' +
       'Your order from ' + firmName + ' has been dispatched via ' + (it.mode || '') + '.\n\n' +
       'Invoice No.: ' + (it.invoice || '—') + '\n' +
-      (it.docket ? 'Docket / AWB: ' + it.docket + '\n' : '') +
       'Please refer to the attached receipt for tracking details.\n\n' +
       'Please ensure someone is available to receive and sign.\n\n' +
       'Contact: ' + (S.user ? S.user.name : '') + ' | ' + firmName;
@@ -3917,7 +3740,6 @@ function batchSendWhatsApp(idx) {
         btn.setAttribute('onclick', 'batchSendWhatsApp(' + (idx+1) + ')');
       }
     } else {
-      S_batch.waQueue = null; // batch complete
       showToast('All WhatsApp messages sent ✓');
     }
   }, 1500);
@@ -3981,7 +3803,7 @@ function openManualEntry(podId) {
   document.getElementById('edit-modal-title').textContent = 'Fill in details manually';
   document.getElementById('edit-modal-body').innerHTML = `
     ${getBestPhotoUrl(pod) ? `
-      <img src="${getBestPhotoUrl(pod)}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid var(--border);margin-bottom:1rem;background:var(--surface3);cursor:zoom-in" alt="Invoice photo" onclick="openLightboxRef(${photoRef(getBestPhotoUrl(pod))})"/>
+      <img src="${getBestPhotoUrl(pod)}" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid var(--border);margin-bottom:1rem;background:var(--surface3);cursor:zoom-in" alt="Invoice photo" onclick="openLightbox('${getBestPhotoUrl(pod).replace(/'/g,"&#39;")}')"/>
     ` : `
       <div style="background:var(--surface3);border-radius:8px;height:100px;display:flex;align-items:center;justify-content:center;margin-bottom:1rem;color:var(--text3);font-size:13px">Photo uploading — check again shortly</div>
     `}
