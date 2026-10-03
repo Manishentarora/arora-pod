@@ -2719,7 +2719,18 @@ function renderCourierEntry() {
     '</div>' +
 
     '<div style="margin-bottom:1rem">' +
-    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px" id="cs-slip-label">2 — LR / DOCKET / RECEIPT</div>' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">2 — PACKING PHOTOS <span style="font-weight:400;color:var(--text3)">(up to 5 — protects against shortage claims)</span></div>' +
+    '<div id="cs-pack-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px"></div>' +
+    '<div id="cs-pack-count" style="font-size:11px;color:var(--text3);margin-bottom:6px">0 / 5 photos added</div>' +
+    '<label id="cs-pack-add-btn" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;padding:0.75rem 1rem;cursor:pointer;position:relative;overflow:hidden;min-height:48px">' +
+      '<input id="cs-pack-input" name="cs-pack-input" type="file" accept="image/*" capture="environment" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%" multiple/>' +
+      '<span style="font-size:1.5rem;pointer-events:none">📦</span>' +
+      '<div style="pointer-events:none"><div style="font-weight:700;color:var(--text);font-size:13px">Add packing photo(s)</div><div style="font-size:11px;color:var(--text3)">Camera or gallery — multiple OK</div></div>' +
+    '</label>' +
+    '</div>' +
+
+    '<div style="margin-bottom:1rem">' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px" id="cs-slip-label">3 — LR / DOCKET / RECEIPT</div>' +
     '<div id="cs-slip-preview" style="display:none;margin-bottom:8px">' +
       '<div id="cs-slip-img-wrap"></div>' +
       '<div style="font-size:12px;color:var(--ok);font-weight:600;margin-top:4px">✓ Receipt captured</div>' +
@@ -2739,7 +2750,7 @@ function renderCourierEntry() {
     '</div>' +
 
     '<div style="margin-bottom:1rem">' +
-    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">3 — INVOICE &amp; CUSTOMER DETAILS</div>' +
+    '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">4 — INVOICE &amp; CUSTOMER DETAILS</div>' +
     '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Invoice number (confirm or type if OCR missed it)</div>' +
     '<input id="cs-invoice" type="text" placeholder="e.g. GST/26-27/4259 or AITPL26-27/1320" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
     '<input id="cs-mobile" type="tel" placeholder="Customer WhatsApp number" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
@@ -2794,6 +2805,32 @@ function renderCourierEntry() {
   }
   wireSlip('cs-slip-cam');
   wireSlip('cs-slip-file');
+
+  // Wire packing photos input — supports multiple files, up to 5 total
+  var packInput = document.getElementById('cs-pack-input');
+  if (packInput) {
+    packInput.onchange = function(e) {
+      var files = Array.prototype.slice.call(e.target.files);
+      e.target.value = '';
+      if (!S.csd) S.csd = {};
+      if (!S.csd.packPhotos) S.csd.packPhotos = [];
+      files.forEach(function(file) {
+        if (S.csd.packPhotos.length >= 5) {
+          showToast('Maximum 5 packing photos allowed'); return;
+        }
+        var r = new FileReader();
+        r.onload = function(ev) {
+          compressPhoto(ev.target.result, 1200, 0.70).then(function(d) {
+            S.csd.packPhotos.push({dataUrl: d, mimeType: file.type, name: file.name});
+            renderPackGrid();
+            saveCsdSession();
+          });
+        };
+        r.readAsDataURL(file);
+      });
+    };
+  }
+  renderPackGrid();
 
   // Restore previously selected mode
   if (S.csd && S.csd.mode) csSelectMode(document.getElementById('cs-btn-' + S.csd.mode));
@@ -2868,8 +2905,9 @@ function saveCsdSession() {
     date:      S.csd.date      || '',
     customer:  S.csd.customer  || '',
     podId:     S.csd.podId     || '',
-    hasInvoice: !!(S.csd.invoiceData),
-    hasSlip:    !!(S.csd.slipData),
+    hasInvoice:  !!(S.csd.invoiceData),
+    hasSlip:     !!(S.csd.slipData),
+    packCount:   (S.csd.packPhotos || []).length,
   };
   try { sessionStorage.setItem('arora_csd', JSON.stringify(toSave)); } catch(e) {}
 }
@@ -2893,15 +2931,15 @@ function loadCsdSession() {
 function csSubmitInvoice(dataUrl, file) {
   if (!hasBackend() || !S.csd) return;
   var id = generateId();
-  S.csd.podId = id;
+  S.csd.podId = id;  // used as a temporary reference ID for OCR polling
   showToast('Invoice uploaded — reading details...');
+  // Use 'ocrInvoice' action — this uploads the photo and runs OCR
+  // but does NOT create a row in the PODs sheet.
+  // The full POD row is created only when sendAlert is called (with slip + contacts).
   sheetPost({
-    action:'submitPOD', id:id, submittedAt:new Date().toISOString(),
-    driverName:S.user.name, driverMobile:S.user.mobile||'',
-    firm:S.user.firm||'Firm 1', invoiceNo:'', customer:'', mobile:'', email:'',
+    action:'ocrInvoice', id:id,
+    firm:S.user.firm||'Firm 1',
     mode:S.csd.mode||'Courier',
-    dispatchDate:new Date().toISOString().slice(0,10),
-    expectedDate:'', docket:'', aiConfidence:'processing',
     photoBase64:dataUrl.split(',')[1],
     photoMimeType:dataUrl.split(';')[0].split(':')[1]
   });
@@ -2911,54 +2949,101 @@ function csSubmitInvoice(dataUrl, file) {
     ocrStatus.innerHTML = '<div style="font-size:12px;color:var(--text3);margin-top:6px">⏳ Reading invoice details...</div>';
   }
 
-  // Poll every 3 seconds until OCR is done (max 10 attempts = 30s)
+  // Poll fetchOCR every 2 seconds until result is ready (max 20 attempts = 40s)
+  // Uses the lightweight CacheService result — does NOT query the PODs sheet
   var ocrPollTimer = setInterval(function() {
-    if (!S.csd) { clearInterval(ocrPollTimer); return; }
-    if (!S.csd.podId) return; // podId not set yet, keep waiting
-    fetchWithTimeout(S.backendUrl+'?action=fetchPODs&firm='+encodeURIComponent(S.user.firm||'Firm 1'),
-      {method:'GET',redirect:'follow'}, 10000)
-    .then(function(r){return r.text();})
+    if (!S.csd || !S.csd.podId) return;
+    fetchWithTimeout(S.backendUrl + '?action=fetchOCR&id=' + encodeURIComponent(S.csd.podId),
+      {method:'GET', redirect:'follow'}, 10000)
+    .then(function(r){ return r.text(); })
     .then(function(t){
       var data = JSON.parse(t);
-      if (!data.success || !data.pods) return;
-      var pod = data.pods.find(function(p){return p.id===S.csd.podId;});
-      if (!pod) return;
-      if (pod.aiConfidence === 'processing') return; // still running
+      if (!data.success || !data.ocr) return; // not ready yet
+      var ocr = data.ocr;
+      if (ocr.confidence === 'processing') return;
+
       // OCR done — stop polling
       clearInterval(ocrPollTimer);
-      S.csd.pod = pod;
-      if (pod.invoice && !S.csd.invoiceNo) S.csd.invoiceNo = pod.invoice;
-      if (pod.customer) S.csd.customer = pod.customer;
+
+      // Store in S.csd
+      S.csd.ocrPhotoUrl = ocr.photoUrl || '';
+      if (ocr.invoice_no    && !S.csd.invoiceNo) { S.csd.invoiceNo = ocr.invoice_no; }
+      if (ocr.customer_name) S.csd.customer = ocr.customer_name;
       saveCsdSession();
+
+      // Update invoice field in DOM
       var invEl = document.getElementById('cs-invoice');
-      if (invEl && !invEl.value && pod.invoice) invEl.value = pod.invoice;
+      if (invEl && !invEl.value && ocr.invoice_no) invEl.value = ocr.invoice_no;
+
+      // Show OCR result panel
       var ocrStatus = document.getElementById('cs-ocr-status');
       if (ocrStatus) {
-        var conf = pod.aiConfidence || 'low';
+        var conf = ocr.confidence || 'low';
         var confColor = conf === 'high' ? 'var(--ok)' : conf === 'medium' ? 'var(--warn)' : 'var(--accent)';
         var lines = [];
-        if (pod.invoice)  lines.push('Invoice: <strong>' + escHtml(pod.invoice) + '</strong>');
-        if (pod.customer) lines.push('Customer: <strong>' + escHtml(pod.customer) + '</strong>');
+        if (ocr.invoice_no)    lines.push('Invoice: <strong>' + escHtml(ocr.invoice_no) + '</strong>');
+        if (ocr.customer_name) lines.push('Customer: <strong>' + escHtml(ocr.customer_name) + '</strong>');
         ocrStatus.innerHTML = lines.length > 0
-          ? '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid '+confColor+'"><div style="font-size:10px;font-weight:700;color:'+confColor+';margin-bottom:4px">\u2713 OCR READ ('+conf.toUpperCase()+' CONFIDENCE)</div><div style="font-size:13px;line-height:1.6">'+lines.join('<br/>')+'</div></div>'
-          : '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)"><div style="font-size:12px;color:var(--warn-text)">\u26a0 Could not read invoice \u2014 fill in manually below</div></div>';
+          ? '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid '+confColor+'"><div style="font-size:10px;font-weight:700;color:'+confColor+';margin-bottom:4px">✓ OCR READ ('+conf.toUpperCase()+' CONFIDENCE)</div><div style="font-size:13px;line-height:1.6">'+lines.join('<br/>')+'</div></div>'
+          : '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)"><div style="font-size:12px;color:var(--warn-text)">⚠ Could not read invoice — fill in manually below</div></div>';
       }
-      lookupContactAndFill(pod.customer, pod.invoice);
+
+      // Trigger contact lookup now that we have customer name + invoice
+      lookupContactAndFill(ocr.customer_name, ocr.invoice_no);
     }).catch(function(){});
-  }, 1500);
-  // Stop polling after 30 seconds regardless
+  }, 2000);
+
+  // Stop after 40 seconds
   setTimeout(function(){
     clearInterval(ocrPollTimer);
     var ocrStatus = document.getElementById('cs-ocr-status');
-    if (ocrStatus && ocrStatus.innerHTML.indexOf('\u23f3') >= 0) {
-      ocrStatus.innerHTML = '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)"><div style="font-size:12px;color:var(--warn-text)">\u26a0 Taking too long \u2014 please fill invoice number manually below</div></div>';
+    if (ocrStatus && ocrStatus.innerHTML.indexOf('⏳') >= 0) {
+      ocrStatus.innerHTML = '<div style="background:var(--warn-soft);border-radius:8px;padding:8px 12px;margin-top:8px;border-left:3px solid var(--warn)"><div style="font-size:12px;color:var(--warn-text)">⚠ Taking too long — fill invoice number manually below</div></div>';
     }
-  }, 30000);
+  }, 40000);
 }
 
 
 // Dedicated fast contact lookup — queries Customers tab directly
 // Called as soon as we know customer name or invoice number
+function renderPackGrid() {
+  var grid  = document.getElementById('cs-pack-grid');
+  var count = document.getElementById('cs-pack-count');
+  var addBtn = document.getElementById('cs-pack-add-btn');
+  if (!grid) return;
+  var photos = (S.csd && S.csd.packPhotos) ? S.csd.packPhotos : [];
+  // Render thumbnails
+  grid.innerHTML = photos.map(function(p, i) {
+    return '<div style="position:relative;border-radius:8px;overflow:hidden;aspect-ratio:1">' +
+      '<img src="' + p.dataUrl + '" style="width:100%;height:100%;object-fit:cover"/>' +
+      '<button onclick="removePackPhoto(' + i + ')" style="position:absolute;top:3px;right:3px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1">&times;</button>' +
+    '</div>';
+  }).join('');
+  if (count) {
+    if (photos.length === 0) {
+      count.textContent = '0 / 5 — add at least one photo to protect against shortage claims';
+      count.style.color = 'var(--text3)';
+    } else if (photos.length < 5) {
+      count.innerHTML = '<span style="color:var(--ok)">&#10003; ' + photos.length + ' photo(s) added</span> &nbsp;&#183;&nbsp; tap Preview &amp; Send when ready, or add up to ' + (5 - photos.length) + ' more';
+    } else {
+      count.innerHTML = '<span style="color:var(--ok)">&#10003; 5 photos added — maximum reached</span>';
+    }
+  }
+  if (addBtn) addBtn.style.display = photos.length >= 5 ? 'none' : 'flex';
+  // After first photo, scroll Preview & Send button into view so dispatch knows they can proceed
+  if (photos.length === 1) {
+    var previewBtn = document.querySelector('[onclick="csPreviewSend()"]');
+    if (previewBtn) setTimeout(function(){ previewBtn.scrollIntoView({behavior:'smooth', block:'nearest'}); }, 300);
+  }
+}
+
+function removePackPhoto(idx) {
+  if (!S.csd || !S.csd.packPhotos) return;
+  S.csd.packPhotos.splice(idx, 1);
+  renderPackGrid();
+  saveCsdSession();
+}
+
 function lookupContactAndFill(customerName, invoiceNo) {
   if (!hasBackend()) return;
   if (!customerName && !invoiceNo) return;
@@ -3008,6 +3093,10 @@ function csPreviewSend() {
   saveCsdSession();
   if (!S.csd.invoiceData) { showToast('Please photograph the invoice first'); return; }
   if (!S.csd.slipData)    { showToast('Please add the ' + (S.csd.mode==='Transport'?'LR copy':S.csd.mode==='Porter'?'Porter receipt':'docket slip') + ' first'); return; }
+  // Warn if no packing photos — not a blocker but important for shortage claims
+  if (!S.csd.packPhotos || !S.csd.packPhotos.length) {
+    if (!confirm('No packing photos added.\n\nWithout photos, shortage claims cannot be disputed.\n\nContinue without packing photos?')) return;
+  }
   if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
   // Save contact to address book
   // Use podId if available, otherwise save directly via a dedicated action
@@ -3086,23 +3175,36 @@ function renderCourierSend() {
     return '<div class="extracted-field"><span class="ef-label">' + escHtml(f[0]) + '</span><span class="ef-val">' + escHtml(f[1]) + '</span></div>';
   }).join('');
 
+  // Packing photos preview strip
+  var packPhotos = (csd.packPhotos || []);
+  var packHtml = packPhotos.length
+    ? '<div style="margin-bottom:0.75rem"><div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">PACKING PHOTOS (' + packPhotos.length + ')</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px">' +
+      packPhotos.map(function(p) {
+        return '<img src="' + p.dataUrl + '" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1.5px solid var(--ok)"/>';
+      }).join('') + '</div>' +
+      '<div style="font-size:10px;color:var(--ok);margin-top:4px">✓ Will be attached to email as evidence</div>' +
+    '</div>'
+    : '<div style="background:var(--warn-soft);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--warn-text);margin-bottom:0.75rem">⚠ No packing photos — shortage claims cannot be disputed</div>';
+
   var c = document.getElementById('main-content');
   c.innerHTML =
     '<div class="section-hd">Review and send</div>' +
     '<div class="card" style="padding:0.75rem 1rem;margin-bottom:0.75rem">' + summaryHtml + '</div>' +
+    packHtml +
     '<div class="card" style="margin-bottom:0.75rem">' +
       '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:6px">MESSAGE PREVIEW</div>' +
       '<div id="wa-preview-courier" style="font-size:12px;white-space:pre-line;background:var(--surface2);padding:0.75rem;border-radius:8px">' + escHtml(waText) + '</div>' +
     '</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem">' +
-      (mobile ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(&apos;customer&apos;)">📱 WhatsApp → ' + escHtml(mobile) + '</button>' : '<div style="font-size:12px;color:var(--text3)">⚠ No customer mobile</div>') +
-      (email  ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(email) + '</button>' : '<div style="font-size:12px;color:var(--text3)">⚠ No customer email</div>') +
-      '<button class="wa-btn" style="width:100%;font-size:13px;opacity:0.85" onclick="sendCourierWA(&apos;company&apos;)">📱 WhatsApp → Company copy</button>' +
-      '<button class="btn btn-outline" style="width:100%;font-size:12px" onclick="copyText(&apos;wa-preview-courier&apos;)">📋 Copy message text</button>' +
+      (email ? '<button class="btn btn-primary" style="width:100%;font-size:14px" onclick="sendCourierEmail()">✉ Email → ' + escHtml(email) + '</button>' : '<div style="font-size:12px;color:var(--text3)">⚠ No customer email — add above</div>') +
+      (mobile ? '<button class="wa-btn" style="width:100%;font-size:14px" onclick="sendCourierWA(&quot;customer&quot;)">📱 WhatsApp → ' + escHtml(mobile) + ' (manual attach photos)</button>' : '<div style="font-size:12px;color:var(--text3)">⚠ No customer mobile</div>') +
+      '<button class="wa-btn" style="width:100%;font-size:13px;opacity:0.85" onclick="sendCourierWA(&quot;company&quot;)">📱 WhatsApp → Company copy</button>' +
+      '<button class="btn btn-outline" style="width:100%;font-size:12px" onclick="copyText(&quot;wa-preview-courier&quot;)">📋 Copy message text</button>' +
     '</div>' +
     '<div style="display:flex;gap:8px">' +
       '<button class="btn btn-outline" style="flex:1" onclick="renderCourierEntry()">← Back</button>' +
-      '<button class="btn btn-outline" style="flex:1" onclick="S.csd=null;showScreen(&apos;dispatch-queue&apos;)">✓ Done</button>' +
+      '<button class="btn btn-outline" style="flex:1" onclick="courierDone()">✓ Done</button>' +
     '</div>';
 }
 
@@ -3124,22 +3226,51 @@ async function sendCourierEmail() {
   var csd  = S.csd || {};
   var pod  = csd.pod || {};
   var slip = csd.slipData;
+  var packPhotos = csd.packPhotos || [];
   var email = csd.email || pod.email || '';
   if (!email) { showToast('No customer email address'); return; }
-  if (!confirm('Send email to ' + email + '?')) return;
+  if (!confirm('Send email to ' + email + '?' +
+    (packPhotos.length ? '\n\n' + packPhotos.length + ' packing photo(s) will be attached.' : ''))) return;
   if (!hasBackend()) { showToast('No backend connected'); return; }
+
+  var btn = event.target;
+  btn.textContent = '⏳ Sending...';
+  btn.disabled = true;
+
+  // Build packing photos payload — base64 array
+  var packPayload = packPhotos.map(function(p, i) {
+    return {
+      base64: p.dataUrl.split(',')[1],
+      mime:   p.mimeType || 'image/jpeg',
+      name:   'pack_' + (i+1) + '.jpg',
+    };
+  });
+
+  var invoiceNo = csd.invoiceNo || pod.invoice || '';
   var res = await sheetPost({
-    action:'sendAlert', podId:pod.id||'', firm:pod.firm||S.user.firm||'Firm 1',
-    invoiceNo:pod.invoice||'', customer:pod.customer||'',
-    mobile:csd.mobile||'', email:email,
-    mode:csd.mode||'', docket:'', expectedDate:csd.date||'',
-    sentBy:S.user.name,
+    action:'sendAlert',
+    podId:        pod.id || '',
+    firm:         pod.firm || S.user.firm || 'Firm 1',
+    invoiceNo:    invoiceNo,
+    customer:     pod.customer || csd.customer || '',
+    mobile:       csd.mobile || '',
+    email:        email,
+    mode:         csd.mode || '',
+    docket:       csd.docket || '',
+    expectedDate: csd.date || '',
+    sentBy:       S.user ? S.user.name : '',
     invoiceDocBase64: csd.invoiceData ? csd.invoiceData.split(',')[1] : '',
     invoiceDocMime:   csd.invoiceData ? csd.invoiceData.split(';')[0].split(':')[1] : 'image/jpeg',
+    invoicePhotoUrl:  csd.ocrPhotoUrl || '',
     slipDocBase64: slip ? slip.dataUrl.split(',')[1] : '',
     slipDocMime:   slip ? slip.mimeType : 'image/jpeg',
+    // Packing photos — array serialised as JSON string (GAS can parse it)
+    packPhotosJson: JSON.stringify(packPayload),
   });
-  showToast(res && res.success ? 'Email sent ✓' : 'Email failed — check connection');
+
+  btn.textContent = '✉ Email → ' + email;
+  btn.disabled = false;
+  showToast(res && res.success ? '✓ Email sent with ' + packPhotos.length + ' packing photo(s)' : '⚠ Email failed — check connection');
 }
 
 
