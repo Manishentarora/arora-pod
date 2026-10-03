@@ -2753,6 +2753,15 @@ function renderCourierEntry() {
     '<div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">4 — INVOICE &amp; CUSTOMER DETAILS</div>' +
     '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Invoice number (confirm or type if OCR missed it)</div>' +
     '<input id="cs-invoice" type="text" placeholder="e.g. GST/26-27/4259 or AITPL26-27/1320" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
+    '<input id="cs-docket" type="text" placeholder="Docket / AWB / LR / Booking ID" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' +
+      '<input id="cs-gstin" type="text" placeholder="Customer GSTIN (optional — for cash/unregistered leave blank)" ' +
+        'style="flex:1;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:13px;box-sizing:border-box;background:var(--surface);color:var(--text)" ' +
+        'oninput="this.value=this.value.toUpperCase()"/>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3);white-space:nowrap;cursor:pointer">' +
+        '<input type="checkbox" id="cs-cash" onchange="csCashToggle(this)" style="width:16px;height:16px"/> Cash / No GST' +
+      '</label>' +
+    '</div>' +
     '<input id="cs-mobile" type="tel" placeholder="Customer WhatsApp number" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
     '<input id="cs-email" type="email" placeholder="Customer email address" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
     '<input id="cs-date" type="date" placeholder="Expected delivery date" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border);font-size:14px;box-sizing:border-box;background:var(--surface);color:var(--text)"/>' +
@@ -2839,6 +2848,20 @@ function renderCourierEntry() {
   if (invEl) {
     var invVal = (S.csd && S.csd.invoiceNo) || (S.csd && S.csd.pod && S.csd.pod.invoice) || '';
     invEl.value = invVal;
+    var docketEl = document.getElementById('cs-docket');
+    if (docketEl && S.csd && S.csd.docket) docketEl.value = S.csd.docket;
+    var gstinEl = document.getElementById('cs-gstin');
+    if (gstinEl && S.csd) {
+      if (S.csd.isCash) {
+        gstinEl.disabled = true;
+        gstinEl.placeholder = 'Cash customer — no GSTIN';
+        gstinEl.style.opacity = '0.5';
+        var cashChk = document.getElementById('cs-cash');
+        if (cashChk) cashChk.checked = true;
+      } else if (S.csd.gstin) {
+        gstinEl.value = S.csd.gstin;
+      }
+    }
     // If dispatch types the invoice number manually, look up contact immediately
     invEl.oninput = function() {
       var typed = this.value.trim();
@@ -2900,6 +2923,9 @@ function saveCsdSession() {
   var toSave = {
     mode:      S.csd.mode      || '',
     invoiceNo: S.csd.invoiceNo || '',
+    docket:    S.csd.docket    || '',
+    gstin:     S.csd.gstin     || '',
+    isCash:    !!(S.csd.isCash),
     mobile:    S.csd.mobile    || '',
     email:     S.csd.email     || '',
     date:      S.csd.date      || '',
@@ -2920,7 +2946,10 @@ function loadCsdSession() {
     if (!S.csd) S.csd = {};
     if (d.mode      && !S.csd.mode)      S.csd.mode      = d.mode;
     if (d.invoiceNo && !S.csd.invoiceNo) S.csd.invoiceNo = d.invoiceNo;
-    if (d.mobile    && !S.csd.mobile)    S.csd.mobile    = d.mobile;
+    if (d.docket   && !S.csd.docket)    S.csd.docket    = d.docket;
+    if (d.gstin    && !S.csd.gstin)     S.csd.gstin     = d.gstin;
+    if (d.isCash)                        S.csd.isCash    = true;
+    if (d.mobile   && !S.csd.mobile)    S.csd.mobile    = d.mobile;
     if (d.email     && !S.csd.email)     S.csd.email     = d.email;
     if (d.date      && !S.csd.date)      S.csd.date      = d.date;
     if (d.customer  && !S.csd.customer)  S.csd.customer  = d.customer;
@@ -2967,8 +2996,13 @@ function csSubmitInvoice(dataUrl, file) {
 
       // Store in S.csd
       S.csd.ocrPhotoUrl = ocr.photoUrl || '';
-      if (ocr.invoice_no    && !S.csd.invoiceNo) { S.csd.invoiceNo = ocr.invoice_no; }
-      if (ocr.customer_name) S.csd.customer = ocr.customer_name;
+      if (ocr.invoice_no    && !S.csd.invoiceNo)  S.csd.invoiceNo = ocr.invoice_no;
+      if (ocr.customer_name)                       S.csd.customer  = ocr.customer_name;
+      if (ocr.customer_gstin && !S.csd.gstin) {
+        S.csd.gstin = ocr.customer_gstin;
+        var gstinEl = document.getElementById('cs-gstin');
+        if (gstinEl && !gstinEl.value) gstinEl.value = ocr.customer_gstin;
+      }
       saveCsdSession();
 
       // Update invoice field in DOM
@@ -3006,6 +3040,25 @@ function csSubmitInvoice(dataUrl, file) {
 
 // Dedicated fast contact lookup — queries Customers tab directly
 // Called as soon as we know customer name or invoice number
+function csCashToggle(chk) {
+  var gstinEl = document.getElementById('cs-gstin');
+  if (!gstinEl) return;
+  if (chk.checked) {
+    gstinEl.value = '';
+    gstinEl.disabled = true;
+    gstinEl.placeholder = 'Cash customer — no GSTIN';
+    gstinEl.style.opacity = '0.5';
+    if (!S.csd) S.csd = {};
+    S.csd.isCash = true;
+    S.csd.gstin  = '';
+  } else {
+    gstinEl.disabled = false;
+    gstinEl.placeholder = 'Customer GSTIN (optional)';
+    gstinEl.style.opacity = '1';
+    if (S.csd) S.csd.isCash = false;
+  }
+}
+
 function renderPackGrid() {
   var grid  = document.getElementById('cs-pack-grid');
   var count = document.getElementById('cs-pack-count');
@@ -3050,6 +3103,8 @@ function lookupContactAndFill(customerName, invoiceNo) {
   var url = S.backendUrl + '?action=lookupContact';
   if (customerName) url += '&customer=' + encodeURIComponent(customerName);
   if (invoiceNo)    url += '&invoiceNo=' + encodeURIComponent(invoiceNo);
+  // Pass GSTIN if already known — enables exact match for same-name customers
+  if (S.csd && S.csd.gstin) url += '&gstin=' + encodeURIComponent(S.csd.gstin);
   fetchWithTimeout(url, {method:'GET', redirect:'follow'}, 10000)
   .then(function(r){return r.text();})
   .then(function(t){
@@ -3070,6 +3125,20 @@ function lookupContactAndFill(customerName, invoiceNo) {
       S.csd.email = contact.email;
       filled = true;
     }
+    // Fill GSTIN if returned and not already entered
+    var gstinEl = document.getElementById('cs-gstin');
+    if (gstinEl && !gstinEl.value && contact.gstin) {
+      gstinEl.value = contact.gstin;
+      S.csd.gstin = contact.gstin;
+    }
+    // Auto-tick Cash checkbox if contact has no GSTIN on record
+    if (contact.isCash && !S.csd.gstin) {
+      var cashChk = document.getElementById('cs-cash');
+      if (cashChk && !cashChk.checked) {
+        cashChk.checked = true;
+        csCashToggle(cashChk);
+      }
+    }
     if (filled) {
       showToast('📒 Contact auto-filled from address book');
       // Update OCR status panel to show contact was found
@@ -3087,6 +3156,10 @@ function lookupContactAndFill(customerName, invoiceNo) {
 function csPreviewSend() {
   if (!S.csd) S.csd = {};
   S.csd.invoiceNo = (document.getElementById('cs-invoice')||{}).value||'';
+  S.csd.docket    = (document.getElementById('cs-docket') ||{}).value||'';
+  S.csd.gstin     = (document.getElementById('cs-gstin')  ||{}).value||'';
+  S.csd.isCash    = !!(document.getElementById('cs-cash') &&
+                       document.getElementById('cs-cash').checked);
   S.csd.mobile    = (document.getElementById('cs-mobile') ||{}).value||'';
   S.csd.email     = (document.getElementById('cs-email')  ||{}).value||'';
   S.csd.date      = (document.getElementById('cs-date')   ||{}).value||'';
@@ -3099,22 +3172,29 @@ function csPreviewSend() {
   }
   if (!S.csd.mobile && !S.csd.email) { showToast('Please enter customer mobile or email'); return; }
   // Save contact to address book
-  // Use podId if available, otherwise save directly via a dedicated action
+  // Courier/Porter/Transport use ocrInvoice (no real POD row yet) → always updateCustomer
+  // Own-fleet uses submitPOD (real POD row exists) → updatePodDetails
   var saveInvNo = S.csd.invoiceNo || (S.csd.pod && S.csd.pod.invoice) || '';
   var saveCust  = (S.csd.pod && S.csd.pod.customer) || S.csd.customer || '';
+  var isCourierMode = (S.csd.mode === 'Courier' || S.csd.mode === 'Porter' || S.csd.mode === 'Transport');
   if ((S.csd.mobile || S.csd.email) && hasBackend()) {
-    if (S.csd.podId) {
-      // Update the existing POD row — this also triggers upsertCustomer in backend
+    if (S.csd.podId && !isCourierMode) {
+      // Own-fleet: real POD row exists — update it (also triggers upsertCustomer in backend)
       sheetPost({action:'updatePodDetails', id:S.csd.podId,
         mobile:S.csd.mobile, email:S.csd.email,
         invoiceNo:saveInvNo, customer:saveCust, updatedBy:S.user.name});
     } else {
-      // No POD row yet — save directly to Customers tab using dedicated action
+      // Courier/Porter/Transport: no POD row yet — save directly to Customers tab
+      // customerName from OCR if available, else use invoice number as fallback key
       sheetPost({action:'updateCustomer',
-        customerName: saveCust,
-        mobile: S.csd.mobile, email: S.csd.email,
-        invoiceNo: saveInvNo, firm: S.user.firm || 'Firm 1',
-        updatedBy: S.user.name});
+        customerName: saveCust || ('INV:' + saveInvNo),
+        mobile:    S.csd.mobile,
+        email:     S.csd.email,
+        gstin:     S.csd.gstin  || '',
+        isCash:    S.csd.isCash || false,
+        invoiceNo: saveInvNo,
+        firm:      S.user ? (S.user.firm || 'Firm 1') : 'Firm 1',
+        updatedBy: S.user ? S.user.name : 'dispatch'});
     }
   }
   renderCourierSend();
@@ -3162,12 +3242,14 @@ function renderCourierSend() {
   waText = waLines.filter(function(l, i) { return !(l === '' && waLines[i-1] === ''); }).join('\n');
   }
 
+  var docketLabel = csd.mode==='Transport' ? 'LR No.' : csd.mode==='Porter' ? 'Booking ID' : 'Docket/AWB';
   var fields = [
-    ['Invoice',  csd.invoiceNo || pod.invoice || '—'],
-    ['Customer', pod.customer || '—'],
-    ['Mode',     mode],
-    ['Mobile',   mobile       || '—'],
-    ['Email',    email        || '—']
+    ['Invoice',   csd.invoiceNo || pod.invoice || '—'],
+    ['Customer',  pod.customer || csd.customer || '—'],
+    ['Mode',      mode],
+    [docketLabel, csd.docket || '—'],
+    ['Mobile',    mobile       || '—'],
+    ['Email',     email        || '—']
   ];
   if (expLine) fields.push(['Delivery', expLine]);
 
@@ -3215,10 +3297,29 @@ function sendCourierWA(target) {
   var text = el ? el.textContent : '';
   if (target === 'company') {
     openWhatsAppCompany(text);
+    showToast('WhatsApp opened — send the message and then tap ✓ Done');
   } else {
     var mobile = (S.csd && S.csd.mobile) || '';
     if (!mobile) { showToast('No customer mobile number'); return; }
     openWhatsApp(mobile, text);
+    // Mark WA as sent in backend after a short delay (gives time for WA to open)
+    setTimeout(function() {
+      if (hasBackend() && S.csd) {
+        sheetPost({
+          action:    'markWASent',
+          podId:     S.csd.podId     || '',
+          invoiceNo: S.csd.invoiceNo || '',
+          sentBy:    S.user ? S.user.name : '',
+        });
+        // Update send status button to show WA sent
+        var waBtn = document.querySelector('[onclick*="sendCourierWA"]');
+        if (waBtn) {
+          waBtn.textContent = '📱 WhatsApp ✓ Sent to ' + mobile;
+          waBtn.style.opacity = '0.7';
+        }
+        showToast('📱 WhatsApp opened — logged as sent');
+      }
+    }, 2000);
   }
 }
 
@@ -3233,9 +3334,8 @@ async function sendCourierEmail() {
     (packPhotos.length ? '\n\n' + packPhotos.length + ' packing photo(s) will be attached.' : ''))) return;
   if (!hasBackend()) { showToast('No backend connected'); return; }
 
-  var btn = event.target;
-  btn.textContent = '⏳ Sending...';
-  btn.disabled = true;
+  var btn = document.querySelector('[onclick*="sendCourierEmail"]');
+  if (btn) { btn.textContent = '⏳ Sending...'; btn.disabled = true; }
 
   // Build packing photos payload — base64 array
   var packPayload = packPhotos.map(function(p, i) {
@@ -3268,11 +3368,68 @@ async function sendCourierEmail() {
     packPhotosJson: JSON.stringify(packPayload),
   });
 
-  btn.textContent = '✉ Email → ' + email;
-  btn.disabled = false;
-  showToast(res && res.success ? '✓ Email sent with ' + packPhotos.length + ' packing photo(s)' : '⚠ Email failed — check connection');
+  if (btn) { btn.textContent = '✉ Email → ' + email; btn.disabled = false; }
+  if (res && res.success) {
+    showToast('✓ Email sent' + (packPhotos.length ? ' with ' + packPhotos.length + ' packing photo(s)' : ''));
+    // Save/update contact now — we have confirmed customer name, mobile, email
+    if (hasBackend() && (csd.mobile || email)) {
+      var custName = (csd.pod && csd.pod.customer) || csd.customer || '';
+      sheetPost({action:'updateCustomer',
+        customerName: custName || ('INV:' + (csd.invoiceNo||'')),
+        mobile:    csd.mobile || '',
+        email:     email,
+        gstin:     csd.gstin  || '',
+        isCash:    csd.isCash || false,
+        invoiceNo: csd.invoiceNo || (pod.invoice||''),
+        firm:      csd.firm || (S.user ? S.user.firm : 'Firm 1') || 'Firm 1',
+        updatedBy: S.user ? S.user.name : 'dispatch'});
+    }
+    // Push a synthetic pod entry so Batch Send shows this alert immediately
+    if (S.csd && S.csd.podId) {
+      var newPod = {
+        id:            S.csd.podId,
+        invoice:       S.csd.invoiceNo || '',
+        customer:      S.csd.customer  || '',
+        mobile:        S.csd.mobile    || '',
+        email:         email,
+        mode:          S.csd.mode      || 'Courier',
+        firm:          S.user ? (S.user.firm||'Firm 1') : 'Firm 1',
+        dispatchDate:  new Date().toISOString().slice(0,10),
+        expectedDate:  S.csd.date      || '',
+        docket:        S.csd.docket    || '',
+        aiConfidence:  'high',
+        status:        'Alerted',
+        alertEmailSent: true,
+        alertWASent:    false,
+      };
+      S.pods = S.pods || [];
+      // Remove any existing entry with same id then push new one
+      S.pods = S.pods.filter(function(p){ return p.id !== newPod.id; });
+      S.pods.unshift(newPod);
+    }
+  } else {
+    showToast('⚠ Email failed — check connection');
+  }
 }
 
+
+function copyText(elId) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  var text = el.innerText || el.textContent || '';
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function(){
+      showToast('✓ Copied to clipboard');
+    }).catch(function(){ fallbackCopy(text); });
+  } else { fallbackCopy(text); }
+}
+function fallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); showToast('✓ Copied'); } catch(e) { showToast('Copy failed — select manually'); }
+  document.body.removeChild(ta);
+}
 
 function openWhatsApp(mobile, text) {
   var clean = mobile.replace(/\D/g,'');
@@ -3312,9 +3469,13 @@ function renderBatchAlerts() {
   var c = document.getElementById('main-content');
 
   // Default date range: today
-  var today = new Date().toISOString().slice(0,10);
-  if (!S_batch.dateFrom) S_batch.dateFrom = today;
-  if (!S_batch.dateTo)   S_batch.dateTo   = today;
+  // Use local date — toISOString() gives UTC which can be previous day in India (IST=UTC+5:30)
+  var now = new Date();
+  var localDate = now.getFullYear() + '-' +
+    String(now.getMonth()+1).padStart(2,'0') + '-' +
+    String(now.getDate()).padStart(2,'0');
+  if (!S_batch.dateFrom) S_batch.dateFrom = localDate;
+  if (!S_batch.dateTo)   S_batch.dateTo   = localDate;
 
   // Filter pods: courier/transport/porter only, within date range, not yet sent
   var filtered = S.pods.filter(function(p) {
@@ -3328,22 +3489,25 @@ function renderBatchAlerts() {
   S_batch.items.forEach(function(it) { itemMap[it.id] = it; });
   var items = filtered.map(function(p) {
     return itemMap[p.id] || {
-      id:       p.id,
-      invoice:  p.invoice  || '',
-      customer: p.customer || '',
-      mobile:   p.mobile   || '',
-      email:    p.email    || '',
-      mode:     p.mode,
-      firm:     p.firm     || 'Firm 1',
-      date:     p.dispatchDate || '',
-      selected: true,
-      sent:     false,
+      id:         p.id,
+      invoice:    p.invoice   || '',
+      customer:   p.customer  || '',
+      mobile:     p.mobile    || '',
+      email:      p.email     || '',
+      mode:       p.mode,
+      firm:       p.firm      || 'Firm 1',
+      date:       p.expectedDate || p.dispatchDate || '',
+      docket:     p.docket    || '',
+      selected:   true,
+      emailSent:  !!(p.alertEmailSent),  // pre-populated from fetchPODs + Alerts tab
+      waSent:     !!(p.alertWASent),     // pre-populated from fetchPODs + Alerts tab
     };
   });
   S_batch.items = items;
 
   var readyCount    = items.filter(function(it){ return it.selected && (it.mobile || it.email); }).length;
   var missingCount  = items.filter(function(it){ return it.selected && !it.mobile && !it.email; }).length;
+  var emailDone     = items.filter(function(it){ return it.selected && it.emailSent; }).length;
 
   // Date range picker
   var dateBar =
@@ -3355,6 +3519,7 @@ function renderBatchAlerts() {
     '</div>';
 
   // Summary bar
+  var waDone = items.filter(function(it){ return it.selected && it.waSent; }).length;
   var summaryBar =
     '<div style="display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap">' +
     '<div style="flex:1;background:var(--info-soft);border-radius:10px;padding:8px 12px;text-align:center">' +
@@ -3362,8 +3527,12 @@ function renderBatchAlerts() {
       '<div style="font-size:10px;color:var(--info-text)">TOTAL</div>' +
     '</div>' +
     '<div style="flex:1;background:var(--ok-soft);border-radius:10px;padding:8px 12px;text-align:center">' +
-      '<div style="font-size:20px;font-weight:800;color:var(--ok-text)">' + readyCount + '</div>' +
-      '<div style="font-size:10px;color:var(--ok-text)">READY</div>' +
+      '<div style="font-size:20px;font-weight:800;color:var(--ok-text)">' + emailDone + '</div>' +
+      '<div style="font-size:10px;color:var(--ok-text)">EMAILED</div>' +
+    '</div>' +
+    '<div style="flex:1;background:var(--teal-soft,#e6f7f7);border-radius:10px;padding:8px 12px;text-align:center">' +
+      '<div style="font-size:20px;font-weight:800;color:var(--teal)">' + waDone + '</div>' +
+      '<div style="font-size:10px;color:var(--teal)">WHATSAPP</div>' +
     '</div>' +
     '<div style="flex:1;background:var(--warn-soft);border-radius:10px;padding:8px 12px;text-align:center">' +
       '<div style="font-size:20px;font-weight:800;color:var(--warn-text)">' + missingCount + '</div>' +
@@ -3376,14 +3545,17 @@ function renderBatchAlerts() {
     ? '<div style="text-align:center;padding:3rem 1rem;color:var(--text3)"><div style="font-size:2rem;margin-bottom:0.5rem">📭</div><p>No courier/transport/porter PODs in this date range</p></div>'
     : items.map(function(it, idx) {
         var hasContact = !!(it.mobile || it.email);
-        var bg = it.sent ? 'var(--ok-soft)' : hasContact ? 'var(--surface)' : 'var(--warn-soft)';
-        var borderColor = it.sent ? 'var(--ok)' : hasContact ? 'var(--border)' : 'var(--warn)';
+        var bg = it.emailSent ? 'var(--ok-soft)' : hasContact ? 'var(--surface)' : 'var(--warn-soft)';
+        var borderColor = it.emailSent ? 'var(--ok)' : hasContact ? 'var(--border)' : 'var(--warn)';
         return '<div style="background:' + bg + ';border:1.5px solid ' + borderColor + ';border-radius:12px;padding:0.75rem 1rem;margin-bottom:8px">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
             '<input type="checkbox" id="batch-chk-' + idx + '" ' + (it.selected ? 'checked' : '') + ' onchange="batchToggle(' + idx + ',this.checked)" style="width:18px;height:18px;cursor:pointer"/>' +
             '<span style="font-weight:700;font-size:13px">' + escHtml(it.invoice || 'No invoice') + '</span>' +
             '<span style="font-size:11px;color:var(--text3)">' + escHtml(it.mode) + ' · ' + escHtml(it.firm) + '</span>' +
-            (it.sent ? '<span style="margin-left:auto;font-size:11px;color:var(--ok);font-weight:700">✓ Sent</span>' : '') +
+            '<span style="margin-left:auto;display:flex;gap:4px;align-items:center">' +
+            (it.emailSent ? '<span style="font-size:10px;background:var(--ok);color:#fff;padding:2px 6px;border-radius:10px;font-weight:700">✉ Emailed</span>' : '<span style="font-size:10px;background:var(--surface2);color:var(--text3);padding:2px 6px;border-radius:10px">✉ Not sent</span>') +
+            (it.waSent    ? '<span style="font-size:10px;background:var(--teal);color:#fff;padding:2px 6px;border-radius:10px;font-weight:700">📱 WhatsApp</span>' : '<span style="font-size:10px;background:var(--surface2);color:var(--text3);padding:2px 6px;border-radius:10px">📱 Pending</span>') +
+            '</span>' +
           '</div>' +
           '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">' + escHtml(it.customer || 'Customer not read yet') + '</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
@@ -3463,7 +3635,7 @@ function batchRefreshContacts() {
 }
 
 async function batchSendEmail() {
-  var toSend = S_batch.items.filter(function(it){ return it.selected && it.email && !it.sent; });
+  var toSend = S_batch.items.filter(function(it){ return it.selected && it.email && !it.emailSent; });
   if (toSend.length === 0) { showToast('No emails to send'); return; }
   if (!confirm('Send email to ' + toSend.length + ' customer(s)? Emails will be sent with a 10-second delay between each.')) return;
 
@@ -3493,7 +3665,7 @@ async function batchSendEmail() {
       });
 
       if (res && res.success) {
-        it.sent = true;
+        it.emailSent = true;
         S_batch.sentCount++;
         showToast('✓ Sent to ' + escHtml(it.customer || it.email) + ' (' + S_batch.sentCount + '/' + toSend.length + ')');
       } else {
@@ -3515,7 +3687,7 @@ async function batchSendEmail() {
 }
 
 function batchSendWhatsApp(idx) {
-  var toSend = S_batch.items.filter(function(it){ return it.selected && it.mobile && !it.sent; });
+  var toSend = S_batch.items.filter(function(it){ return it.selected && it.mobile && !it.waSent; });
   if (toSend.length === 0) { showToast('No WhatsApp numbers to send to'); return; }
   if (idx >= toSend.length) { showToast('All WhatsApp messages opened ✓'); return; }
 
@@ -3542,6 +3714,19 @@ function batchSendWhatsApp(idx) {
 
   // Open WhatsApp for this customer
   openWhatsApp(it.mobile, waText);
+
+  // Mark WA sent in backend and update local state
+  setTimeout(function() {
+    it.waSent = true;
+    if (hasBackend()) {
+      sheetPost({
+        action:    'markWASent',
+        podId:     it.id        || '',
+        invoiceNo: it.invoice   || '',
+        sentBy:    S.user ? S.user.name : '',
+      });
+    }
+  }, 2000);
 
   // Show next button after a moment
   setTimeout(function() {
