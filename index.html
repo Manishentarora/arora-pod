@@ -614,7 +614,7 @@ async function sheetFetch() {
     const res = await fetchWithTimeout(
       S.backendUrl + '?action=fetchPODs&firm=' + firmParam + '&apiSecret=' + encodeURIComponent(localStorage.getItem('arora_api_secret')||''),
       { method: 'GET', redirect: 'follow' },
-      15000
+      30000  // 30s — GAS cold start can take 15-20s on first call
     );
     const text = await res.text();
     let data;
@@ -861,13 +861,19 @@ function loadLocalPods() {
 }
 
 // Called after dispatch/management login to load live data from Sheet
-async function loadPodsFromSheet() {
+async function loadPodsFromSheet(retryAttempt) {
   setSyncStatus('syncing');
   S.isLoading = true;
   const livePods = await sheetFetch();
   S.isLoading = false;
 
   if (livePods === null) {
+    // Auto-retry once after 4s (handles GAS cold-start timeouts silently)
+    if (!retryAttempt) {
+      console.log('sheetFetch: first attempt failed, auto-retrying in 4s...');
+      setTimeout(function() { loadPodsFromSheet(true); }, 4000);
+      return; // keep 'syncing' spinner showing during retry
+    }
     setSyncStatus('error');
     // Show error on whatever screen is showing — don't leave spinner forever
     const c = document.getElementById('main-content');
