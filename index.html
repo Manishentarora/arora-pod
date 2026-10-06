@@ -613,32 +613,45 @@ function fetchWithTimeout(url, options, timeoutMs) {
   return Promise.race([fetch(url, options), timeoutPromise]);
 }
 
+// sheetFetch returns:
+//   Array of pods  → success
+//   {error, retryable} → failure with reason
+//     retryable:true  = cold start / network blip, worth retrying
+//     retryable:false = bad secret, bad URL, GAS error — retry won't help
 async function sheetFetch() {
-  if (!hasBackend()) return null;
-  // Dispatch: server filters to their firm. Management 'Both': fetch all.
+  if (!hasBackend()) return {error:'No backend URL configured', retryable:false};
   const firmParam = (S.user && S.user.firm && S.user.firm !== 'Both')
     ? encodeURIComponent(S.user.firm) : 'all';
   try {
     const res = await fetchWithTimeout(
       S.backendUrl + '?action=fetchPODs&firm=' + firmParam + '&apiSecret=' + encodeURIComponent(localStorage.getItem('arora_api_secret')||''),
       { method: 'GET', redirect: 'follow' },
-      30000  // 30s — GAS cold start can take 15-20s on first call
+      50000  // 50s — GAS cold start can take 30-45s on a busy account
     );
     const text = await res.text();
+    // GAS sometimes returns an HTML error page (expired deployment, access revoked)
+    if (text.trim().startsWith('<')) {
+      console.error('Sheet response was HTML (not JSON) — deployment may be stale:', text.slice(0, 120));
+      return {error:'Apps Script returned an error page. Redeploy the backend (Deploy → New version).', retryable:false};
+    }
     let data;
     try { data = JSON.parse(text); }
     catch(e) {
       console.error('Sheet response not JSON:', text.slice(0, 200));
-      return null;
+      return {error:'Unexpected response from server. Try again.', retryable:true};
     }
     if (data.success && Array.isArray(data.pods)) {
-      return data.pods;
+      return data.pods; // ← only success path
+    }
+    if (data.error === 'Unauthorized') {
+      return {error:'API secret is wrong or not set. Go to Settings → check the API secret matches the Config tab.', retryable:false};
     }
     console.error('Sheet fetch failed:', data);
-    return null;
+    return {error: data.error || 'Server returned an error.', retryable:true};
   } catch(err) {
+    const isTimeout = err.message && err.message.includes('Timeout');
     console.error('sheetFetch error:', err.name, err.message);
-    return null;
+    return {error: isTimeout ? 'Request timed out (server may be starting up).' : err.message, retryable:true};
   }
 }
 
@@ -665,20 +678,22 @@ async function sheetPost(payload) {
   }
 }
 
-function setSyncStatus(status) {
+function setSyncStatus(status, errorMsg) {
   S.syncStatus = status;
+  S.syncError  = errorMsg || S.syncError || '';
   const el = document.getElementById('sync-indicator');
   if (!el) return;
   const map = {
     idle:    {text:'', color:'transparent'},
-    syncing: {text:'⟳ Loading from Sheet...', color:'var(--warn-soft)'},
+    syncing: {text:'⟳ Syncing...', color:'var(--warn-soft)'},
     ok:      {text:'✓ Sheet synced', color:'var(--ok-soft)'},
-    error:   {text:'⚠ Sheet error — tap to retry', color:'var(--accent-soft)'},
+    error:   {text:'⚠ Sync error — tap to retry', color:'var(--accent-soft)'},
   };
   const s = map[status] || map.idle;
   el.textContent = s.text;
   el.style.background = s.color;
   el.style.display = s.text ? 'block' : 'none';
+  el.title = (status === 'error' && S.syncError) ? S.syncError : '';
   el.onclick = (status === 'error') ? loadPodsFromSheet : null;
   el.style.cursor = (status === 'error') ? 'pointer' : 'default';
 }
@@ -872,44 +887,49 @@ function loadLocalPods() {
 async function loadPodsFromSheet(retryAttempt) {
   setSyncStatus('syncing');
   S.isLoading = true;
-  const livePods = await sheetFetch();
+  const result = await sheetFetch();
   S.isLoading = false;
 
-  if (livePods === null) {
-    // Auto-retry once after 4s (handles GAS cold-start timeouts silently)
-    if (!retryAttempt) {
-      console.log('sheetFetch: first attempt failed, auto-retrying in 4s...');
-      setTimeout(function() { loadPodsFromSheet(true); }, 4000);
+  // result is either an Array (success) or {error, retryable} (failure)
+  const isFailure = !Array.isArray(result);
+
+  if (isFailure) {
+    const retryable = result.retryable !== false; // default true
+    // Auto-retry once after 5s, but only if it's worth retrying (cold start / network)
+    if (retryable && !retryAttempt) {
+      console.log('sheetFetch: retryable failure, auto-retrying in 5s...', result.error);
+      setTimeout(function() { loadPodsFromSheet(true); }, 5000);
       return; // keep 'syncing' spinner showing during retry
     }
-    setSyncStatus('error');
-    // Show error on whatever screen is showing — don't leave spinner forever
+    const errMsg = result.error || 'Could not reach Google Sheet.';
+    setSyncStatus('error', errMsg);
+    const showRetry = retryable;
     const c = document.getElementById('main-content');
-    if (c && (c.innerHTML.includes('Loading from Google Sheet') || c.innerHTML.includes('spinner'))) {
-      c.innerHTML = `
-        <div style="padding:2rem 1rem;text-align:center">
-          <div style="font-size:36px;margin-bottom:1rem">⚠️</div>
-          <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px">Could not reach Google Sheet</div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:1.5rem;line-height:1.6">
-            Check that your Apps Script is deployed correctly and the URL is correct.
-          </div>
-          <button class="btn btn-primary" onclick="loadPodsFromSheet()" style="max-width:240px;margin:0 auto 0.75rem">
-            Retry
-          </button>
-          <button class="btn btn-outline" onclick="openBackendSetup()" style="max-width:240px;margin:0 auto">
-            Change Sheet URL
-          </button>
-          <div style="margin-top:1.5rem;font-size:12px;color:var(--text3)">
-            <strong>Common fixes:</strong><br/>
-            1. In Apps Script → Deploy → Manage deployments<br/>
-            2. Edit → New version → Deploy<br/>
-            3. Make sure "Who has access" is set to <strong>Anyone</strong>
-          </div>
-        </div>
-      `;
+    // Always replace the content area if it's a loading/spinner state OR if it's
+    // showing an old error — so the user always sees the latest reason
+    if (c) {
+      const html = c.innerHTML;
+      const isLoadingState = html.includes('Loading from Google Sheet') ||
+                             html.includes('spinner') ||
+                             html.includes('Could not reach Google Sheet') ||
+                             html.includes('⚠️');
+      if (isLoadingState) {
+        c.innerHTML =
+          '<div style="padding:2rem 1rem;text-align:center">' +
+            '<div style="font-size:36px;margin-bottom:1rem">⚠️</div>' +
+            '<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px">Could not reach Google Sheet</div>' +
+            '<div style="font-size:13px;color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:10px 14px;margin-bottom:1rem;text-align:left;line-height:1.6">' +
+              escHtml(errMsg) +
+            '</div>' +
+            (showRetry ? '<button class="btn btn-primary" onclick="loadPodsFromSheet()" style="max-width:240px;margin:0 auto 0.75rem">Retry</button>' : '') +
+            '<button class="btn btn-outline" onclick="openBackendSetup()" style="max-width:240px;margin:0 auto">Settings / Change URL</button>' +
+          '</div>';
+      }
     }
     return;
   }
+
+  const livePods = result; // Array
 
   // Merge: local pods not yet in Sheet + Sheet data
   const sheetIds = new Set(livePods.map(p => p.id));
