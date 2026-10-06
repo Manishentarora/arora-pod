@@ -1363,6 +1363,19 @@ function appStartup() {
     enterApp();
     return;
   }
+  // Restore a persisted staff session (survives page reload / returning from Drive photo)
+  try {
+    const savedSession = localStorage.getItem('arora_session_user');
+    if (savedSession) {
+      const u = JSON.parse(savedSession);
+      if (u && u.role && u.name) {
+        S.user = u;
+        enterApp();
+        return;
+      }
+    }
+  } catch(e) {}
+
   // Check if device role was chosen before (staff devices)
   const deviceRole = localStorage.getItem('arora_device_role');
   if (deviceRole === 'staff') {
@@ -1694,6 +1707,9 @@ async function doLogin() {
     S.user = {name, role:'management', firm: firmView};
   }
 
+  // Persist session so page reload / returning from a photo link doesn't log out
+  try { localStorage.setItem('arora_session_user', JSON.stringify(S.user)); } catch(e) {}
+
   document.getElementById('login-screen').style.display = 'none';
   enterApp();
 }
@@ -1947,6 +1963,7 @@ function confirmLogout() {
   if (S.user && S.user.role === 'driver') return; // drivers use "Reset device" in settings
   if (!confirm('Log out and return to login screen?')) return;
   // Clear session state but keep device-level settings (backend URL, driver profile)
+  try { localStorage.removeItem('arora_session_user'); } catch(e) {}
   S.user = null; S.pods = []; S.screen = null; S.sheetLoaded = false;
   selectedRole = null;
   document.getElementById('app-shell').style.display = 'none';
