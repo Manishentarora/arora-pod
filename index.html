@@ -658,24 +658,64 @@ async function sheetFetch() {
 async function sheetPost(payload) {
   if (!hasBackend()) return {success: true, offline: true};
   try {
-    // Use no-cors mode to bypass CORS restrictions on Android Chrome.
-    // This means we cannot read the response, but the POST goes through.
-    // Apps Script receives and processes it correctly.
-    // apiSecret is sent with every request — backend rejects calls without it,
-    // protecting against anyone who finds the public backend URL.
     const secret = localStorage.getItem('arora_api_secret') || '';
+    // Android Chrome blocks cross-origin POST reads (CORS), so we use no-cors.
+    // The POST body always reaches GAS — we just can't read the response.
+    // For submitPOD we verify separately with checkPOD (a GET) after sending.
     await fetch(S.backendUrl, {
       method: 'POST',
       body: JSON.stringify({...payload, apiSecret: secret}),
       mode: 'no-cors',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
     });
-    // With no-cors we always get an opaque response — treat as success
+    // With no-cors the response is always opaque — treat POST as sent.
     return {success: true};
   } catch(err) {
     console.error('sheetPost error:', err.name, err.message);
     return {success: false, error: err.message};
   }
+}
+
+// Verify a submitPOD actually landed in the sheet by polling checkPOD (GET).
+// Called after submitPOD — waits up to 70s (GAS cold start can be 45s + write time).
+// Shows warning banner on driver screen if it never confirms.
+async function verifyPodLanded(podId) {
+  if (!hasBackend()) return;
+  const secret = localStorage.getItem('arora_api_secret') || '';
+  const url = S.backendUrl + '?action=checkPOD&id=' + encodeURIComponent(podId)
+              + '&apiSecret=' + encodeURIComponent(secret);
+  const delays = [15000, 20000, 20000, 15000]; // poll at 15s, 35s, 55s, 70s
+  let elapsed = 0;
+  for (const delay of delays) {
+    await new Promise(r => setTimeout(r, delay));
+    elapsed += delay;
+    try {
+      const res  = await fetchWithTimeout(url, { method:'GET', redirect:'follow' }, 10000);
+      const text = await res.text();
+      if (text && !text.trim().startsWith('<')) {
+        const data = JSON.parse(text);
+        if (data && data.found) {
+          console.log('verifyPodLanded: confirmed in sheet after', elapsed/1000, 's');
+          // Update the local pod's photoUrl if backend sent it back
+          if (data.photoUrl) {
+            const pod = S.pods.find(p => p.id === podId);
+            if (pod) { pod.photoUrl = data.photoUrl; savePodsLocally(); clearPhotoSession(podId); }
+          }
+          // Refresh driver screen to remove pending banner
+          if (S.user && S.user.role === 'driver') renderDriverUpload();
+          return;
+        }
+        if (data && data.error === 'Unauthorized') {
+          showToast('⚠️ API secret wrong — POD not saved to sheet. Check Settings.', 8000);
+          return;
+        }
+      }
+    } catch(e) { console.warn('verifyPodLanded poll error:', e.message); }
+  }
+  // Never confirmed after 70s — show warning
+  console.warn('verifyPodLanded: POD', podId, 'not confirmed in sheet after 70s');
+  showToast('⚠️ POD may not have reached the sheet. Tap Resend if it appears in the banner.', 7000);
+  if (S.user && S.user.role === 'driver') renderDriverUpload(); // show pending banner
 }
 
 function setSyncStatus(status, errorMsg) {
@@ -881,6 +921,57 @@ function loadLocalPods() {
     const raw = localStorage.getItem('arora_local_pods');
     return raw ? JSON.parse(raw) : [];
   } catch(e) { return []; }
+}
+
+// Resubmit any locally-stored PODs whose submitPOD POST silently failed.
+// Called on driver app load (2s delay) so it doesn't block the UI.
+// Also callable manually via the "Resend pending" button.
+async function resubmitPendingPods() {
+  if (!hasBackend()) return;
+  const pending = S.pods.filter(p =>
+    p.photoUrl === 'session' || p.aiStatus === 'processing'
+  );
+  if (pending.length === 0) return;
+
+  // Check which of these are actually missing from the sheet by fetching their IDs.
+  // We use a lightweight check: ask the backend if each ID exists.
+  // To avoid complexity, we simply resubmit all — the backend's ID duplicate check
+  // will silently skip any that already exist.
+  let resubmitted = 0;
+  for (const pod of pending) {
+    const storedPhoto = loadPhotoSession(pod.id);
+    const photoBase64   = storedPhoto ? storedPhoto.split(',')[1]  : '';
+    const photoMimeType = storedPhoto ? storedPhoto.split(';')[0].split(':')[1] : 'image/jpeg';
+    try {
+      const res = await sheetPost({
+        action: 'submitPOD',
+        id: pod.id,
+        submittedAt: new Date(pod.ts).toISOString(),
+        driverName:   pod.driver       || '',
+        driverMobile: pod.driverMobile || '',
+        firm:         pod.firm         || 'Firm 1',
+        invoiceNo:    pod.invoice      || '',
+        customer:     pod.customer     || '',
+        mobile:       pod.mobile       || '',
+        email:        pod.email        || '',
+        mode:         pod.mode         || 'Own Fleet',
+        dispatchDate: pod.dispatchDate || '',
+        expectedDate: pod.expectedDate || '',
+        docket:       pod.docket       || '',
+        aiConfidence: 'processing',
+        photoBase64, photoMimeType,
+      });
+      if (res && res.photoUrl) {
+        pod.photoUrl = res.photoUrl;
+        clearPhotoSession(pod.id);
+      }
+      resubmitted++;
+    } catch(e) { console.warn('resubmit failed for', pod.id, e); }
+  }
+  if (resubmitted > 0) {
+    savePodsLocally();
+    showToast('📤 ' + resubmitted + ' POD(s) sent to sheet');
+  }
 }
 
 // Called after dispatch/management login to load live data from Sheet
@@ -2093,6 +2184,10 @@ function enterApp() {
       S.pods.sort((a, b) => b.ts - a.ts);
     }
     showScreen('driver-upload');
+    // Resubmit any PODs that never made it to the sheet (silent POST failure at submit time)
+    if (hasBackend()) {
+      setTimeout(function() { resubmitPendingPods(); }, 2000);
+    }
   } else {
     showScreen('dispatch-queue');
     if (hasBackend()) {
@@ -2186,6 +2281,15 @@ function renderDriverUpload() {
     ? '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#065f46;background:#d1fae5;display:inline-block;padding:3px 12px;border-radius:20px">' + todayCount + ' submitted today</div>'
     : '';
 
+  // Pending resubmit banner — shows if any local PODs haven't reached the sheet yet
+  const pendingCount = S.pods.filter(p => p.photoUrl === 'session' || p.aiStatus === 'processing').length;
+  const pendingBanner = (pendingCount > 0 && hasBackend())
+    ? '<div style="margin:0.5rem 1rem 0;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
+        '<div style="font-size:13px;color:#92400e;font-weight:600">⚠️ ' + pendingCount + ' POD' + (pendingCount>1?'s':'') + ' not yet in sheet</div>' +
+        '<button onclick="resubmitPendingPods()" style="background:#f59e0b;border:none;color:#fff;font-size:12px;font-weight:700;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit">Resend</button>' +
+      '</div>'
+    : '';
+
   const isDispatch = (S.user.role === 'dispatch' || S.user.role === 'management');
 
   // Mode selector — shown for dispatch so they can tag courier/porter/transport
@@ -2222,6 +2326,7 @@ function renderDriverUpload() {
       '</div>' +
       todayHtml +
     '</div>' +
+    pendingBanner +
     modeBar +
     '<div style="margin:0.5rem">' +
       (canUpload
@@ -2283,6 +2388,8 @@ function handleDriverPhoto(event) {
       if (hasBackend()) {
         const photoBase64   = dataUrl.split(',')[1];
         const photoMimeType = dataUrl.split(';')[0].split(':')[1];
+        // Fire POST (no-cors — reaches GAS on Android, but response is unreadable).
+        // Then verify via GET poll so we detect silent failures within 70s.
         sheetPost({
           action: 'submitPOD',
           id: newPod.id, submittedAt: new Date(newPod.ts).toISOString(),
@@ -2291,15 +2398,10 @@ function handleDriverPhoto(event) {
           mode: newPod.mode, dispatchDate: newPod.dispatchDate,
           expectedDate: newPod.expectedDate, docket: '',
           aiConfidence: 'processing', photoBase64, photoMimeType,
-        }).then(res => {
-          if (res && res.photoUrl) {
-            newPod.photoUrl = res.photoUrl;
-            savePodsLocally();
-            clearPhotoSession(newPod.id);
-          }
-          setSyncStatus(res && res.success ? 'ok' : 'error');
         });
         setSyncStatus('syncing');
+        // Verify the row landed — polls backend up to 70s, shows warning if not
+        verifyPodLanded(newPod.id);
       }
       S.uploadMode = null; // reset for next submission
       runAIInBackground(newPod, dataUrl);
