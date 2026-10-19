@@ -684,7 +684,7 @@ async function verifyPodLanded(podId) {
   const secret = localStorage.getItem('arora_api_secret') || '';
   const url = S.backendUrl + '?action=checkPOD&id=' + encodeURIComponent(podId)
               + '&apiSecret=' + encodeURIComponent(secret);
-  const delays = [15000, 20000, 20000, 15000]; // poll at 15s, 35s, 55s, 70s
+  const delays = [15000, 15000]; // poll at 15s, 30s — resubmit if still not found
   let elapsed = 0;
   for (const delay of delays) {
     await new Promise(r => setTimeout(r, delay));
@@ -701,21 +701,19 @@ async function verifyPodLanded(podId) {
             const pod = S.pods.find(p => p.id === podId);
             if (pod) { pod.photoUrl = data.photoUrl; savePodsLocally(); clearPhotoSession(podId); }
           }
-          // Refresh driver screen to remove pending banner
-          if (S.user && S.user.role === 'driver') renderDriverUpload();
+          setSyncStatus('ok');
           return;
         }
         if (data && data.error === 'Unauthorized') {
-          showToast('⚠️ API secret wrong — POD not saved to sheet. Check Settings.', 8000);
+          console.error('verifyPodLanded: Unauthorized — API secret wrong or missing');
           return;
         }
       }
     } catch(e) { console.warn('verifyPodLanded poll error:', e.message); }
   }
-  // Never confirmed after 70s — show warning
-  console.warn('verifyPodLanded: POD', podId, 'not confirmed in sheet after 70s');
-  showToast('⚠️ POD may not have reached the sheet. Tap Resend if it appears in the banner.', 7000);
-  if (S.user && S.user.role === 'driver') renderDriverUpload(); // show pending banner
+  // Never confirmed after 30s — resubmit silently
+  console.warn('verifyPodLanded: POD', podId, 'not confirmed after 30s — auto-resubmitting');
+  resubmitPendingPods();
 }
 
 function setSyncStatus(status, errorMsg) {
@@ -970,7 +968,7 @@ async function resubmitPendingPods() {
   }
   if (resubmitted > 0) {
     savePodsLocally();
-    showToast('📤 ' + resubmitted + ' POD(s) sent to sheet');
+    console.log('resubmitPendingPods: pushed', resubmitted, 'POD(s) to sheet');
   }
 }
 
@@ -1068,7 +1066,7 @@ async function loadPodsFromSheet(retryAttempt) {
         console.log('Resubmit result for', pod.id, res);
       });
     });
-    if (localOnly.length > 0) showToast('📤 Resubmitting ' + localOnly.length + ' pending POD(s) to sheet…');
+    if (localOnly.length > 0) console.log('Auto-resubmitting', localOnly.length, 'local-only POD(s) found during sheet sync');
   }
 
   // Compute daysOverdue client-side for Sheet pods
@@ -2281,14 +2279,7 @@ function renderDriverUpload() {
     ? '<div style="margin-top:8px;font-size:12px;font-weight:600;color:#065f46;background:#d1fae5;display:inline-block;padding:3px 12px;border-radius:20px">' + todayCount + ' submitted today</div>'
     : '';
 
-  // Pending resubmit banner — shows if any local PODs haven't reached the sheet yet
-  const pendingCount = S.pods.filter(p => p.photoUrl === 'session' || p.aiStatus === 'processing').length;
-  const pendingBanner = (pendingCount > 0 && hasBackend())
-    ? '<div style="margin:0.5rem 1rem 0;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px">' +
-        '<div style="font-size:13px;color:#92400e;font-weight:600">⚠️ ' + pendingCount + ' POD' + (pendingCount>1?'s':'') + ' not yet in sheet</div>' +
-        '<button onclick="resubmitPendingPods()" style="background:#f59e0b;border:none;color:#fff;font-size:12px;font-weight:700;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit">Resend</button>' +
-      '</div>'
-    : '';
+  const pendingBanner = ''; // auto-resubmit is silent — no banner shown to driver
 
   const isDispatch = (S.user.role === 'dispatch' || S.user.role === 'management');
 
