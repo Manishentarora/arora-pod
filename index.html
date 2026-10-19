@@ -936,6 +936,50 @@ async function loadPodsFromSheet(retryAttempt) {
   const localOnly = S.pods.filter(p => !sheetIds.has(p.id) &&
     (p.aiStatus === 'processing' || p.aiStatus === 'unclear' || p.status === 'pending'));
 
+  // ── AUTO-RESUBMIT: push any local-only PODs that never made it to the sheet ──
+  // This handles the common case where GAS was cold/slow at submit time and
+  // the fire-and-forget POST silently failed. We resubmit using the photo
+  // still held in sessionStorage (it stays until the Drive URL comes back).
+  if (localOnly.length > 0 && hasBackend()) {
+    console.log('Auto-resubmitting', localOnly.length, 'local POD(s) missing from sheet...');
+    localOnly.forEach(function(pod) {
+      const storedPhoto = loadPhotoSession(pod.id); // base64 from sessionStorage
+      if (!storedPhoto) {
+        // Photo already cleared or session expired — can't resubmit with photo,
+        // but push the row so it at least appears in the sheet (photo will be missing)
+        console.warn('No stored photo for pod', pod.id, '— resubmitting without photo');
+      }
+      const photoBase64   = storedPhoto ? storedPhoto.split(',')[1]  : '';
+      const photoMimeType = storedPhoto ? storedPhoto.split(';')[0].split(':')[1] : 'image/jpeg';
+      sheetPost({
+        action: 'submitPOD',
+        id: pod.id,
+        submittedAt: new Date(pod.ts).toISOString(),
+        driverName:   pod.driver       || '',
+        driverMobile: pod.driverMobile || '',
+        firm:         pod.firm         || 'Firm 1',
+        invoiceNo:    pod.invoice      || '',
+        customer:     pod.customer     || '',
+        mobile:       pod.mobile       || '',
+        email:        pod.email        || '',
+        mode:         pod.mode         || 'Own Fleet',
+        dispatchDate: pod.dispatchDate || '',
+        expectedDate: pod.expectedDate || '',
+        docket:       pod.docket       || '',
+        aiConfidence: pod.aiStatus === 'done' ? 'high' : 'processing',
+        photoBase64, photoMimeType,
+      }).then(function(res) {
+        if (res && res.photoUrl) {
+          pod.photoUrl = res.photoUrl;
+          savePodsLocally();
+          clearPhotoSession(pod.id);
+        }
+        console.log('Resubmit result for', pod.id, res);
+      });
+    });
+    if (localOnly.length > 0) showToast('📤 Resubmitting ' + localOnly.length + ' pending POD(s) to sheet…');
+  }
+
   // Compute daysOverdue client-side for Sheet pods
   livePods.forEach(p => {
     p.daysOverdue = daysOverdue(p);
