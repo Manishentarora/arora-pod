@@ -4352,7 +4352,10 @@ async function fetchSerialCompleteness(firm, fy) {
     );
     const data = JSON.parse(await res.text());
     return data.success ? data : null;
-  } catch(e) { return null; }
+  } catch(err) {
+    console.error('[SerialTracker] fetchSerialCompleteness failed:', err);
+    return null;
+  }
 }
 
 async function renderSerialTracker() {
@@ -4416,30 +4419,56 @@ async function renderSerialTracker() {
 
     html += `</div>`;
 
-    // Full register table
+    // Full register table — rendered lazily to avoid freezing on 600+ rows
     if (res.maxSerial > 0) {
+      const PAGE = 50;
+      const safeLabel = label.replace(/[^a-zA-Z0-9]/g,'_');
+      // store full data in a closure-accessible variable keyed by label
+      window._serialRegData = window._serialRegData || {};
+      window._serialRegData[safeLabel] = { res, label, fy, serialToPod };
+
+      function buildRegRows(from, to) {
+        let rows = '';
+        for (let s = from; s <= to; s++) {
+          const pod = serialToPod[label+'|'+s];
+          const isException = exSet.has(s);
+          const ex = isException ? (res.exceptions||[]).find(e=>e.serial===s) : null;
+          rows += `<div style="padding:0.6rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+            <span style="font-size:13px;font-weight:700;color:var(--text2);width:42px;flex-shrink:0">#${s}</span>
+            <span style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              ${pod ? escHtml(pod.invoice||'') + (pod.customer ? ' — ' + escHtml(pod.customer) : '') : (isException ? escHtml(ex.reason + (ex.note?': '+ex.note:'')) : '—')}
+            </span>
+            ${isException ? '<span class="badge badge-grey">Cancelled</span>' : statusBadge(pod)}
+          </div>`;
+        }
+        return rows;
+      }
+
+      const firstEnd = Math.min(PAGE, res.maxSerial);
       html += `
         <div class="card" style="padding:0">
-          <div style="padding:0.75rem 1rem;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+          <div style="padding:0.75rem 1rem;background:var(--surface2);border-bottom:1px solid var(--border)">
             <span style="font-size:12px;font-weight:700;color:var(--text2)">${label} — Full register (#1 → #${res.maxSerial})</span>
-          </div>`;
-      for (let s = 1; s <= res.maxSerial; s++) {
-        const pod = serialToPod[label+'|'+s];
-        const isException = exSet.has(s);
-        const ex = isException ? (res.exceptions||[]).find(e=>e.serial===s) : null;
-        html += `<div style="padding:0.6rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-          <span style="font-size:13px;font-weight:700;color:var(--text2);width:42px;flex-shrink:0">#${s}</span>
-          <span style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            ${pod ? escHtml(pod.invoice||'') + (pod.customer ? ' — ' + escHtml(pod.customer) : '') : (isException ? escHtml(ex.reason + (ex.note?': '+ex.note:'')) : '—')}
-          </span>
-          ${isException
-            ? '<span class="badge badge-grey">Cancelled</span>'
-            : statusBadge(pod)}
+          </div>
+          <div id="reg-rows-${safeLabel}">${buildRegRows(1, firstEnd)}</div>
+          ${res.maxSerial > PAGE ? `<div style="padding:0.75rem 1rem;text-align:center">
+            <button class="btn btn-sm" id="reg-more-${safeLabel}" onclick="loadMoreRegRows('${safeLabel}', ${firstEnd+1}, ${res.maxSerial})">
+              Show more (#${firstEnd+1}–#${Math.min(firstEnd+PAGE, res.maxSerial)})
+            </button>
+          </div>` : ''}
         </div>`;
-      }
-      html += `</div>`;
     }
     return html;
+  }
+
+  // If ALL results failed, show a clear error instead of blank screen
+  if (results.every(r => !r)) {
+    c.innerHTML = `<div style="text-align:center;padding:3rem 1rem">
+      <p style="color:var(--danger);font-weight:600">Could not load invoice register</p>
+      <p style="color:var(--text3);font-size:13px">The backend took too long or returned an error.<br>Check browser console for details, then try again.</p>
+      <button class="btn btn-outline" style="margin-top:1rem" onclick="renderSerialTracker()">↻ Retry</button>
+    </div>`;
+    return;
   }
 
   let html = results.map((res,i) => firmBlock(firmsToShow[i], res)).join('');
@@ -4472,6 +4501,51 @@ async function renderSerialTracker() {
   html += `</div>`;
 
   c.innerHTML = html;
+}
+
+function loadMoreRegRows(safeLabel, from, maxSerial) {
+  const PAGE = 50;
+  const d = window._serialRegData && window._serialRegData[safeLabel];
+  if (!d) return;
+  const { res, label, serialToPod } = d;
+  const exSet = new Set((res.exceptions||[]).map(e=>e.serial));
+
+  function statusBadge(pod) {
+    if (!pod) return '<span class="badge badge-grey">No image</span>';
+    if (pod.status === 'approved')   return '<span class="badge badge-ok">✓ Approved</span>';
+    if (pod.status === 'incomplete') return '<span class="badge badge-warn">⚠ Incomplete</span>';
+    if (pod.aiStatus === 'processing') return '<span class="badge badge-info">↑ Uploaded</span>';
+    return '<span class="badge badge-err">● Pending</span>';
+  }
+
+  const to = Math.min(from + PAGE - 1, maxSerial);
+  let rows = '';
+  for (let s = from; s <= to; s++) {
+    const pod = serialToPod[label+'|'+s];
+    const isException = exSet.has(s);
+    const ex = isException ? (res.exceptions||[]).find(e=>e.serial===s) : null;
+    rows += `<div style="padding:0.6rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <span style="font-size:13px;font-weight:700;color:var(--text2);width:42px;flex-shrink:0">#${s}</span>
+      <span style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        ${pod ? escHtml(pod.invoice||'') + (pod.customer ? ' — ' + escHtml(pod.customer) : '') : (isException ? escHtml(ex.reason + (ex.note?': '+ex.note:'')) : '—')}
+      </span>
+      ${isException ? '<span class="badge badge-grey">Cancelled</span>' : statusBadge(pod)}
+    </div>`;
+  }
+
+  const container = document.getElementById('reg-rows-' + safeLabel);
+  if (container) container.insertAdjacentHTML('beforeend', rows);
+
+  const btn = document.getElementById('reg-more-' + safeLabel);
+  if (btn) {
+    if (to < maxSerial) {
+      const nextEnd = Math.min(to + PAGE, maxSerial);
+      btn.textContent = `Show more (#${to+1}–#${nextEnd})`;
+      btn.setAttribute('onclick', `loadMoreRegRows('${safeLabel}', ${to+1}, ${maxSerial})`);
+    } else {
+      btn.parentElement.remove();
+    }
+  }
 }
 
 function showMarkExceptionModal(firm, fy, serial) {
