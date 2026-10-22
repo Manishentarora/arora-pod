@@ -4348,7 +4348,7 @@ async function fetchSerialCompleteness(firm, fy) {
   try {
     const res = await fetchWithTimeout(
       S.backendUrl + '?action=getSerialCompleteness&firm=' + encodeURIComponent(firm) + '&fy=' + encodeURIComponent(fy) + '&apiSecret=' + encodeURIComponent(localStorage.getItem('arora_api_secret')||''),
-      {method:'GET', redirect:'follow'}, 15000
+      {method:'GET', redirect:'follow'}, 50000
     );
     const data = JSON.parse(await res.text());
     return data.success ? data : null;
