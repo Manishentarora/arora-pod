@@ -4409,11 +4409,15 @@ async function renderSerialTracker() {
 
     // Missing numbers only — compact chips
     if (missing.length > 0) {
+      const MAX_SHOW = 100;
+      const shown = missing.slice(0, MAX_SHOW);
+      const overflow = missing.length - shown.length;
       html += `<div style="margin-top:0.5rem">
-        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:6px">NOT UPLOADED (window: #${res.minSerial} → #${res.maxSerial+50})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:5px">
-          ${missing.map(s=>`<span class="badge badge-err" style="cursor:pointer" onclick="showMarkExceptionModal('${label}','${fy}',${s})">#${s}</span>`).join('')}
+        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:6px">NOT UPLOADED (window: #${res.minSerial||'?'} → #${(res.maxSerial||0)+50})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
+          ${shown.map(s=>`<span class="badge badge-err" style="cursor:pointer" onclick="showMarkExceptionModal('${label}','${fy}',${s})">#${s}</span>`).join('')}
         </div>
+        ${overflow > 0 ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">…and ${overflow} more not shown</div>` : ''}
         <div style="font-size:11px;color:var(--text3);margin-top:6px">Tap a number to mark as cancelled / explained</div>
       </div>`;
     } else {
@@ -4484,33 +4488,40 @@ function searchInvoices(query) {
   if (!q) { out.innerHTML = ''; return; }
 
   const matches = (S.pods || []).filter(p => {
-    const inv  = (p.invoice  || '').toLowerCase();
+    // invoice field is p.invoice on local pods; some sheet-synced pods may also have p.invoiceNo
+    const inv  = (p.invoice || p.invoiceNo || '').toLowerCase();
     const cust = (p.customer || '').toLowerCase();
-    const date = (p.submittedAt || p.date || '').toLowerCase();
-    return inv.includes(q) || cust.includes(q) || date.includes(q);
-  }).slice(0, 20); // cap at 20 results
+    // date: use ts (always present) formatted, or submittedAt string
+    const dateStr = p.ts ? new Date(p.ts).toLocaleDateString('en-IN') : '';
+    const dateFull = (p.submittedAt || dateStr || '').toLowerCase();
+    return inv.includes(q) || cust.includes(q) || dateFull.includes(q);
+  }).slice(0, 20);
 
   if (!matches.length) {
     out.innerHTML = `<div style="font-size:13px;color:var(--text3);padding:0.5rem 0">No invoices found for "${escHtml(query)}"</div>`;
     return;
   }
 
-  function statusBadge(pod) {
+  function sBadge(pod) {
     if (pod.status === 'approved')     return '<span class="badge badge-ok">✓ Approved</span>';
     if (pod.status === 'incomplete')   return '<span class="badge badge-warn">⚠ Incomplete</span>';
     if (pod.aiStatus === 'processing') return '<span class="badge badge-info">↑ Uploaded</span>';
     return '<span class="badge badge-err">● Pending</span>';
   }
 
-  out.innerHTML = matches.map(p => `
-    <div style="padding:0.6rem 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px" onclick="openPodDetail('${escHtml(p.id||'')}')">
+  out.innerHTML = matches.map(p => {
+    const inv  = p.invoice || p.invoiceNo || '—';
+    const dateStr = p.ts ? new Date(p.ts).toLocaleDateString('en-IN') : (p.submittedAt||'');
+    const safeId = (p.id||'').replace(/'/g,"\\'");
+    return `<div style="padding:0.6rem 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px;cursor:pointer" onclick="openReviewModal('${safeId}')">
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700;color:var(--text)">${escHtml(p.invoice||'—')}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text)">${escHtml(inv)}</div>
         <div style="font-size:12px;color:var(--text2)">${escHtml(p.customer||'')}${p.firm?' · '+escHtml(p.firm):''}</div>
-        <div style="font-size:11px;color:var(--text3)">${escHtml(String(p.submittedAt||p.date||''))}</div>
+        <div style="font-size:11px;color:var(--text3)">${escHtml(dateStr)}</div>
       </div>
-      ${statusBadge(p)}
-    </div>`).join('');
+      ${sBadge(p)}
+    </div>`;
+  }).join('');
 }
 
 function showMarkExceptionModal(firm, fy, serial) {
