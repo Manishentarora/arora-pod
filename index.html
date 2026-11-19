@@ -4393,71 +4393,34 @@ async function renderSerialTracker() {
     if (!res) return `<div class="card"><div class="card-title">${label}</div><div style="font-size:13px;color:var(--text3)">Could not load</div></div>`;
     const missing = res.missing || [];
     const exSet   = new Set((res.exceptions||[]).map(e=>e.serial));
+    const safeLabel = label.replace(/[^a-zA-Z0-9]/g,'_');
 
-    // Summary
+    // Summary header
     let html = `
       <div class="card">
         <div class="card-title">${label} — FY ${fy}</div>
-        <div class="pod-tags" style="margin-bottom:1rem">
-          <span class="badge badge-info">${res.totalUsed} invoices</span>
-          <span class="badge badge-grey">up to #${res.maxSerial}</span>
+        <div class="pod-tags" style="margin-bottom:0.5rem">
+          <span class="badge badge-info">${res.totalUsed} uploaded</span>
+          <span class="badge badge-grey">#${res.minSerial||'?'} – #${res.maxSerial}</span>
           ${missing.length > 0
             ? `<span class="badge badge-err">⚠ ${missing.length} missing</span>`
             : '<span class="badge badge-ok">✓ No gaps</span>'}
         </div>`;
 
-    // Gap summary chips
+    // Missing numbers only — compact chips
     if (missing.length > 0) {
-      html += `<div style="margin-bottom:0.75rem">
-        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:4px">MISSING / NOT UPLOADED</div>
+      html += `<div style="margin-top:0.5rem">
+        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:6px">NOT UPLOADED (window: #${res.minSerial} → #${res.maxSerial+50})</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px">
           ${missing.map(s=>`<span class="badge badge-err" style="cursor:pointer" onclick="showMarkExceptionModal('${label}','${fy}',${s})">#${s}</span>`).join('')}
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Tap a number to mark it cancelled/explained</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">Tap a number to mark as cancelled / explained</div>
       </div>`;
+    } else {
+      html += `<div style="font-size:13px;color:var(--ok-text);margin-top:0.5rem">✓ All invoice numbers in range are accounted for.</div>`;
     }
 
     html += `</div>`;
-
-    // Full register table — rendered lazily to avoid freezing on 600+ rows
-    if (res.maxSerial > 0) {
-      const PAGE = 50;
-      const safeLabel = label.replace(/[^a-zA-Z0-9]/g,'_');
-      // store full data in a closure-accessible variable keyed by label
-      window._serialRegData = window._serialRegData || {};
-      window._serialRegData[safeLabel] = { res, label, fy, serialToPod };
-
-      function buildRegRows(from, to) {
-        let rows = '';
-        for (let s = from; s <= to; s++) {
-          const pod = serialToPod[label+'|'+s];
-          const isException = exSet.has(s);
-          const ex = isException ? (res.exceptions||[]).find(e=>e.serial===s) : null;
-          rows += `<div style="padding:0.6rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-            <span style="font-size:13px;font-weight:700;color:var(--text2);width:42px;flex-shrink:0">#${s}</span>
-            <span style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-              ${pod ? escHtml(pod.invoice||'') + (pod.customer ? ' — ' + escHtml(pod.customer) : '') : (isException ? escHtml(ex.reason + (ex.note?': '+ex.note:'')) : '—')}
-            </span>
-            ${isException ? '<span class="badge badge-grey">Cancelled</span>' : statusBadge(pod)}
-          </div>`;
-        }
-        return rows;
-      }
-
-      const firstEnd = Math.min(PAGE, res.maxSerial);
-      html += `
-        <div class="card" style="padding:0">
-          <div style="padding:0.75rem 1rem;background:var(--surface2);border-bottom:1px solid var(--border)">
-            <span style="font-size:12px;font-weight:700;color:var(--text2)">${label} — Full register (#1 → #${res.maxSerial})</span>
-          </div>
-          <div id="reg-rows-${safeLabel}">${buildRegRows(1, firstEnd)}</div>
-          ${res.maxSerial > PAGE ? `<div style="padding:0.75rem 1rem;text-align:center">
-            <button class="btn btn-sm" id="reg-more-${safeLabel}" onclick="loadMoreRegRows('${safeLabel}', ${firstEnd+1}, ${res.maxSerial})">
-              Show more (#${firstEnd+1}–#${Math.min(firstEnd+PAGE, res.maxSerial)})
-            </button>
-          </div>` : ''}
-        </div>`;
-    }
     return html;
   }
 
@@ -4486,6 +4449,16 @@ async function renderSerialTracker() {
     });
   });
 
+  // ── Invoice search panel ──────────────────────────────────────────────────
+  html += `
+    <div class="card" style="margin-top:0.5rem">
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:0.75rem">🔍 Search uploaded invoices</div>
+      <input id="inv-search-box" type="search" placeholder="Invoice #, customer name, or date…"
+        style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:14px;background:var(--surface2);color:var(--text);outline:none"
+        oninput="searchInvoices(this.value)"/>
+      <div id="inv-search-results" style="margin-top:0.75rem"></div>
+    </div>`;
+
   html += `<div style="margin-top:1rem">
     <button class="btn btn-outline" onclick="showMarkExceptionModal('${firmsToShow[0]}','${fy}','')" style="margin-bottom:0.5rem">+ Mark a serial as cancelled</button>`;
 
@@ -4503,49 +4476,41 @@ async function renderSerialTracker() {
   c.innerHTML = html;
 }
 
-function loadMoreRegRows(safeLabel, from, maxSerial) {
-  const PAGE = 50;
-  const d = window._serialRegData && window._serialRegData[safeLabel];
-  if (!d) return;
-  const { res, label, serialToPod } = d;
-  const exSet = new Set((res.exceptions||[]).map(e=>e.serial));
+// ── Invoice search (used by the search box in serial tracker) ────────────────
+function searchInvoices(query) {
+  const out = document.getElementById('inv-search-results');
+  if (!out) return;
+  const q = (query || '').trim().toLowerCase();
+  if (!q) { out.innerHTML = ''; return; }
+
+  const matches = (S.pods || []).filter(p => {
+    const inv  = (p.invoice  || '').toLowerCase();
+    const cust = (p.customer || '').toLowerCase();
+    const date = (p.submittedAt || p.date || '').toLowerCase();
+    return inv.includes(q) || cust.includes(q) || date.includes(q);
+  }).slice(0, 20); // cap at 20 results
+
+  if (!matches.length) {
+    out.innerHTML = `<div style="font-size:13px;color:var(--text3);padding:0.5rem 0">No invoices found for "${escHtml(query)}"</div>`;
+    return;
+  }
 
   function statusBadge(pod) {
-    if (!pod) return '<span class="badge badge-grey">No image</span>';
-    if (pod.status === 'approved')   return '<span class="badge badge-ok">✓ Approved</span>';
-    if (pod.status === 'incomplete') return '<span class="badge badge-warn">⚠ Incomplete</span>';
+    if (pod.status === 'approved')     return '<span class="badge badge-ok">✓ Approved</span>';
+    if (pod.status === 'incomplete')   return '<span class="badge badge-warn">⚠ Incomplete</span>';
     if (pod.aiStatus === 'processing') return '<span class="badge badge-info">↑ Uploaded</span>';
     return '<span class="badge badge-err">● Pending</span>';
   }
 
-  const to = Math.min(from + PAGE - 1, maxSerial);
-  let rows = '';
-  for (let s = from; s <= to; s++) {
-    const pod = serialToPod[label+'|'+s];
-    const isException = exSet.has(s);
-    const ex = isException ? (res.exceptions||[]).find(e=>e.serial===s) : null;
-    rows += `<div style="padding:0.6rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-      <span style="font-size:13px;font-weight:700;color:var(--text2);width:42px;flex-shrink:0">#${s}</span>
-      <span style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-        ${pod ? escHtml(pod.invoice||'') + (pod.customer ? ' — ' + escHtml(pod.customer) : '') : (isException ? escHtml(ex.reason + (ex.note?': '+ex.note:'')) : '—')}
-      </span>
-      ${isException ? '<span class="badge badge-grey">Cancelled</span>' : statusBadge(pod)}
-    </div>`;
-  }
-
-  const container = document.getElementById('reg-rows-' + safeLabel);
-  if (container) container.insertAdjacentHTML('beforeend', rows);
-
-  const btn = document.getElementById('reg-more-' + safeLabel);
-  if (btn) {
-    if (to < maxSerial) {
-      const nextEnd = Math.min(to + PAGE, maxSerial);
-      btn.textContent = `Show more (#${to+1}–#${nextEnd})`;
-      btn.setAttribute('onclick', `loadMoreRegRows('${safeLabel}', ${to+1}, ${maxSerial})`);
-    } else {
-      btn.parentElement.remove();
-    }
-  }
+  out.innerHTML = matches.map(p => `
+    <div style="padding:0.6rem 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px" onclick="openPodDetail('${escHtml(p.id||'')}')">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">${escHtml(p.invoice||'—')}</div>
+        <div style="font-size:12px;color:var(--text2)">${escHtml(p.customer||'')}${p.firm?' · '+escHtml(p.firm):''}</div>
+        <div style="font-size:11px;color:var(--text3)">${escHtml(String(p.submittedAt||p.date||''))}</div>
+      </div>
+      ${statusBadge(p)}
+    </div>`).join('');
 }
 
 function showMarkExceptionModal(firm, fy, serial) {
