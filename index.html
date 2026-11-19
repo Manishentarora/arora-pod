@@ -4457,7 +4457,7 @@ async function renderSerialTracker() {
   html += `
     <div class="card" style="margin-top:0.5rem">
       <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:0.75rem">🔍 Search uploaded invoices</div>
-      <input id="inv-search-box" type="search" placeholder="Invoice #, customer name, or date…"
+      <input id="inv-search-box" type="text" inputmode="search" placeholder="Invoice #, customer name, or date…"
         style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:14px;background:var(--surface2);color:var(--text);outline:none"
         oninput="searchInvoices(this.value)"/>
       <div id="inv-search-results" style="margin-top:0.75rem"></div>
@@ -4469,6 +4469,8 @@ async function renderSerialTracker() {
   if (S.user.role === 'management') {
     html += `
     <div style="margin-top:1rem;display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-outline" onclick="showSerialFloorModal('${firmsToShow[0]}')" style="font-size:13px">📌 Set gap tracking start # (${firmsToShow[0]})</button>
+      ${firmsToShow.length > 1 ? `<button class="btn btn-outline" onclick="showSerialFloorModal('${firmsToShow[1]}')" style="font-size:13px">📌 Set gap tracking start # (${firmsToShow[1]})</button>` : ''}
       <button class="btn btn-outline" onclick="changeManagementPassword()" style="font-size:13px">🔒 Change management password</button>
       <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 1')" style="font-size:13px">🔑 Set Firm 1 dispatch password</button>
       <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 2')" style="font-size:13px">🔑 Set Firm 2 dispatch password</button>
@@ -4522,6 +4524,41 @@ function searchInvoices(query) {
       ${sBadge(p)}
     </div>`;
   }).join('');
+}
+
+function showSerialFloorModal(firm) {
+  document.getElementById('edit-modal-title').textContent = 'Set gap tracking start — ' + firm;
+  document.getElementById('edit-modal-body').innerHTML = `
+    <div style="font-size:13px;color:var(--text2);margin-bottom:1rem">
+      Invoices below this number will be ignored in the missing gaps list.<br>
+      Set this to the first invoice number submitted via this app.
+    </div>
+    <div class="field">
+      <label class="field-label">Start tracking from invoice #</label>
+      <input id="serial-floor-input" type="number" min="1" class="field-input" placeholder="e.g. 6100" style="font-size:16px"/>
+    </div>`;
+  document.getElementById('edit-modal-action').onclick = async function() {
+    const floor = document.getElementById('serial-floor-input').value.trim();
+    if (!floor || isNaN(parseInt(floor))) { alert('Please enter a valid invoice number'); return; }
+    const btn = document.getElementById('edit-modal-action');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const res = await postBackend({action:'setSerialFloor', firm, floor:parseInt(floor)});
+      if (res && res.success) {
+        closeModal();
+        renderSerialTracker();
+      } else {
+        alert('Failed: ' + (res && res.error ? res.error : 'Unknown error'));
+        btn.disabled = false; btn.textContent = 'Save';
+      }
+    } catch(e) {
+      alert('Error: ' + e.message);
+      btn.disabled = false; btn.textContent = 'Save';
+    }
+  };
+  document.getElementById('edit-modal-action').textContent = 'Save';
+  document.getElementById('edit-modal-action').disabled = false;
+  openModal();
 }
 
 function showMarkExceptionModal(firm, fy, serial) {
