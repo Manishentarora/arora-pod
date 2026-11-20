@@ -4492,9 +4492,13 @@ async function renderSerialTracker(fyOverride) {
   });
 
   // ── Invoice search panel ──────────────────────────────────────────────────
+  const podCount = (S.pods || []).length;
   html += `
     <div class="card" style="margin-top:0.5rem">
-      <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:0.75rem">🔍 Search uploaded invoices</div>
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:0.75rem">🔍 Search uploaded invoices
+        <span style="font-size:11px;font-weight:400;color:var(--text3);margin-left:6px">(${podCount} in memory)</span>
+      </div>
+      ${podCount === 0 ? `<div style="font-size:12px;color:var(--accent);margin-bottom:0.75rem">⚠ No invoices loaded yet — <button class="btn btn-outline" style="font-size:12px;padding:0.2rem 0.6rem" onclick="loadPodsFromSheet().then(()=>renderSerialTracker())">Load now</button></div>` : ''}
       <input id="inv-search-box" type="text" inputmode="search" placeholder="Invoice #, customer name, or date…"
         style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:14px;background:var(--surface2);color:var(--text);outline:none"
         oninput="searchInvoices(this.value)"/>
@@ -4528,13 +4532,15 @@ function searchInvoices(query) {
   if (!q) { out.innerHTML = ''; return; }
 
   const matches = (S.pods || []).filter(p => {
-    // invoice field is p.invoice on local pods; some sheet-synced pods may also have p.invoiceNo
-    const inv  = (p.invoice || p.invoiceNo || '').toLowerCase();
+    // invoice can be "26-27/4258" or plain "4258" — search both the full string and the serial part
+    const invFull = (p.invoice || p.invoiceNo || '').toLowerCase();
+    const invParts = invFull.split('/');
+    const invSerial = invParts[invParts.length - 1]; // last segment after last /
     const cust = (p.customer || '').toLowerCase();
-    // date: use ts (always present) formatted, or submittedAt string
+    // date: dispatch date preferred, then ts formatted, then submittedAt
     const dateStr = p.ts ? new Date(p.ts).toLocaleDateString('en-IN') : '';
-    const dateFull = (p.submittedAt || dateStr || '').toLowerCase();
-    return inv.includes(q) || cust.includes(q) || dateFull.includes(q);
+    const dateFull = ((p.dispatchDate || '') + ' ' + (p.submittedAt || dateStr || '')).toLowerCase();
+    return invFull.includes(q) || invSerial.includes(q) || cust.includes(q) || dateFull.includes(q);
   }).slice(0, 20);
 
   if (!matches.length) {
