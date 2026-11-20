@@ -2,7 +2,7 @@
 // Must be served from same origin as the app for PWA installability.
 // Place this file in the root of the GitHub Pages repo (same folder as index.html).
 
-const CACHE = 'arora-pod-v2';
+const CACHE = 'arora-pod-v3';
 const SHELL = ['./'];  // cache the app shell (index.html)
 
 self.addEventListener('install', e => {
@@ -27,17 +27,15 @@ self.addEventListener('fetch', e => {
   if (!e.request.url.startsWith(self.location.origin)) return;
   if (e.request.url.includes('script.google.com')) return;
 
+  // Network-first: always try to get the latest, fall back to cache if offline
   e.respondWith(
-    caches.open(CACHE).then(cache =>
-      cache.match(e.request).then(cached => {
-        const fresh = fetch(e.request).then(res => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            cache.put(e.request, res.clone());
-          }
-          return res;
-        }).catch(() => cached);
-        return cached || fresh;
-      })
+    fetch(e.request).then(res => {
+      if (res && res.status === 200 && res.type === 'basic') {
+        caches.open(CACHE).then(cache => cache.put(e.request, res.clone()));
+      }
+      return res;
+    }).catch(() =>
+      caches.open(CACHE).then(cache => cache.match(e.request))
     )
   );
 });
