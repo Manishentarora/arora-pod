@@ -1982,11 +1982,12 @@ function renderPodSearch(query) {
         : cards) +
     '</div>';
 
-  // Keep keyboard focus in the input after re-render
+  // Restore focus to input after re-render (but don't touch value — that triggers oninput again)
   var inp = document.getElementById('pod-search-input');
-  if (inp && document.activeElement !== inp) {
-    // Restore cursor to end
-    var v = inp.value; inp.value = ''; inp.value = v;
+  if (inp) {
+    inp.focus();
+    // Move cursor to end without reassigning value (reassigning fires oninput and loops)
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch(e){}
   }
 }
 
