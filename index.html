@@ -4591,11 +4591,11 @@ async function renderSerialTracker(fyOverride) {
     <div style="margin-top:1rem;display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-outline" onclick="showSerialFloorModal('${firmsToShow[0]}')" style="font-size:13px">📌 Set gap tracking start # (${firmsToShow[0]})</button>
       ${firmsToShow.length > 1 ? `<button class="btn btn-outline" onclick="showSerialFloorModal('${firmsToShow[1]}')" style="font-size:13px">📌 Set gap tracking start # (${firmsToShow[1]})</button>` : ''}
-      <button class="btn btn-outline" onclick="changeManagementPassword('MGMT_PASSWORD','both-firms management','arora_pw_hash_management_mgmt')" style="font-size:13px">🔒 Change password — Both firms</button>
-      <button class="btn btn-outline" onclick="changeManagementPassword('MGMT_F1_PASSWORD','Firm 1 management','arora_pw_hash_management_Firm 1')" style="font-size:13px">🔒 Change password — Firm 1 management</button>
-      <button class="btn btn-outline" onclick="changeManagementPassword('MGMT_F2_PASSWORD','Firm 2 management','arora_pw_hash_management_Firm 2')" style="font-size:13px">🔒 Change password — Firm 2 management</button>
-      <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 1')" style="font-size:13px">🔑 Set Firm 1 dispatch password</button>
-      <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 2')" style="font-size:13px">🔑 Set Firm 2 dispatch password</button>
+      ${S.user.loginFirm === 'Both' ? `<button class="btn btn-outline" onclick="changeManagementPassword('MGMT_PASSWORD','both-firms management','arora_pw_hash_management_mgmt')" style="font-size:13px">🔒 Change password — Both firms</button>` : ''}
+      ${(S.user.loginFirm === 'Both' || S.user.loginFirm === 'Firm 1') ? `<button class="btn btn-outline" onclick="changeManagementPassword('MGMT_F1_PASSWORD','Firm 1 management','arora_pw_hash_management_Firm 1')" style="font-size:13px">🔒 Change password — Firm 1 management</button>` : ''}
+      ${(S.user.loginFirm === 'Both' || S.user.loginFirm === 'Firm 2') ? `<button class="btn btn-outline" onclick="changeManagementPassword('MGMT_F2_PASSWORD','Firm 2 management','arora_pw_hash_management_Firm 2')" style="font-size:13px">🔒 Change password — Firm 2 management</button>` : ''}
+      ${(S.user.loginFirm === 'Both' || S.user.loginFirm === 'Firm 1') ? `<button class="btn btn-outline" onclick="changeDispatchPassword('Firm 1')" style="font-size:13px">🔑 Set Firm 1 dispatch password</button>` : ''}
+      ${(S.user.loginFirm === 'Both' || S.user.loginFirm === 'Firm 2') ? `<button class="btn btn-outline" onclick="changeDispatchPassword('Firm 2')" style="font-size:13px">🔑 Set Firm 2 dispatch password</button>` : ''}
       <button class="btn btn-outline" onclick="showDiagnostics()" style="font-size:13px">🔍 Diagnostics</button>
     </div>`;
   }
