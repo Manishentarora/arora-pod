@@ -356,15 +356,15 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
     <div id="mgmt-login-fields" style="display:none;margin-top:10px">
       <div class="field">
         <label class="label" for="login-mgmt-view">View data for</label>
-        <select id="login-mgmt-view">
+        <select id="login-mgmt-view" onchange="updateMgmtPwLabel()">
           <option value="Both">Both firms</option>
           <option value="Firm 1">Firm 1 — Arora Enterprises only</option>
           <option value="Firm 2">Firm 2 — Arora Industrial Traders only</option>
         </select>
       </div>
       <div class="field">
-        <label class="label" for="login-mgmt-pw">Management password</label>
-        <input type="password" id="login-mgmt-pw" placeholder="Enter management password"/>
+        <label class="label" id="login-mgmt-pw-label">Management password</label>
+        <input type="password" id="login-mgmt-pw" placeholder="Enter password"/>
       </div>
     </div>
     <div style="margin-top:14px" class="field">
@@ -1816,13 +1816,14 @@ async function doLogin() {
     const firmView = document.getElementById('login-mgmt-view').value || 'Both';
     const pw       = (document.getElementById('login-mgmt-pw').value || '').trim();
     if (!pw) { showToast('Please enter the management password'); return; }
-    const verified = await verifyRolePassword('management', null, pw);
+    // Each firm view has its own password key: Both→mgmt, Firm1→mgmt_f1, Firm2→mgmt_f2
+    const mgmtFirmKey = firmView === 'Firm 1' ? 'Firm 1' : firmView === 'Firm 2' ? 'Firm 2' : null;
+    const verified = await verifyRolePassword('management', mgmtFirmKey, pw);
     if (!verified) {
-      showToast('Incorrect management password');
+      showToast('Incorrect password for ' + firmView);
       document.getElementById('login-mgmt-pw').value = '';
       return;
     }
-    // Management firm view: 'Both' means see everything; 'Firm 1'/'Firm 2' filters
     S.user = {name, role:'management', firm: firmView};
   }
 
@@ -1834,24 +1835,39 @@ async function doLogin() {
 }
 
 async function verifyRolePassword(role, firm, pw) {
-  // sheetPost uses no-cors mode so response body is never readable.
-  // Password verification uses locally cached hashes only.
-  // Hash is stored on first login from a device that knows the password.
+  // Password cache keys:
+  //   dispatch Firm 1  → arora_pw_hash_dispatch_Firm 1
+  //   dispatch Firm 2  → arora_pw_hash_dispatch_Firm 2
+  //   management Both  → arora_pw_hash_management_mgmt   (shared / "both firms" password)
+  //   management Firm1 → arora_pw_hash_management_Firm 1
+  //   management Firm2 → arora_pw_hash_management_Firm 2
   const cacheKey = 'arora_pw_hash_' + role + '_' + (firm||'mgmt');
   const cached = localStorage.getItem(cacheKey);
   if (cached) {
-    const match = cached === simpleHash(pw);
-    if (!match) return false;
-    return true;
+    return cached === simpleHash(pw);
   }
-  // First time on this device - store the hash and allow entry.
-  // The password will be validated against the Sheet passively in background.
+  // First time on this device — store hash and allow entry.
   localStorage.setItem(cacheKey, simpleHash(pw));
-  // Fire-and-forget verify in background (can't read response due to no-cors)
   if (hasBackend()) {
     sheetPost({action:'verifyPassword', role, firm, password:pw}).catch(()=>{});
   }
   return true;
+}
+
+// Update the password field label to match the selected firm view
+function updateMgmtPwLabel() {
+  const view = document.getElementById('login-mgmt-view');
+  const lbl  = document.getElementById('login-mgmt-pw-label');
+  if (!view || !lbl) return;
+  const labels = {
+    'Both':   'Management password (both firms)',
+    'Firm 1': 'Firm 1 management password',
+    'Firm 2': 'Firm 2 management password',
+  };
+  lbl.textContent = labels[view.value] || 'Management password';
+  // Clear the password field when firm changes to avoid confusion
+  const pwEl = document.getElementById('login-mgmt-pw');
+  if (pwEl) pwEl.value = '';
 }
 
 function simpleHash(str) {
@@ -2140,18 +2156,24 @@ async function changeDispatchPassword(firm) {
   }
 }
 
-async function changeManagementPassword() {
-  const cur = prompt('Enter current management password:');
+async function changeManagementPassword(targetKey, label) {
+  targetKey = targetKey || 'MGMT_PASSWORD';
+  label     = label     || 'management';
+  const cur = prompt('Enter current ' + label + ' password:');
   if (!cur) return;
-  const nw1 = prompt('Enter new password:');
+  const nw1 = prompt('Enter new ' + label + ' password:');
   if (!nw1) return;
   const nw2 = prompt('Confirm new password:');
   if (nw1 !== nw2) { showToast('Passwords do not match'); return; }
   if (hasBackend()) {
-    const res = await sheetPost({action:'changePassword', targetKey:'MGMT_PASSWORD', currentPassword:cur, newPassword:nw1});
+    const res = await sheetPost({action:'changePassword', targetKey, currentPassword:cur, newPassword:nw1});
     if (res && res.success) {
-      localStorage.setItem('arora_pw_hash_management_mgmt', simpleHash(nw1));
-      showToast('Management password changed');
+      // Update local hash cache for the matching login key
+      const cacheKey = targetKey === 'MGMT_F1_PASSWORD' ? 'arora_pw_hash_management_Firm 1'
+                     : targetKey === 'MGMT_F2_PASSWORD' ? 'arora_pw_hash_management_Firm 2'
+                     : 'arora_pw_hash_management_mgmt';
+      localStorage.setItem(cacheKey, simpleHash(nw1));
+      showToast(label + ' password changed ✓');
     } else {
       showToast(res && res.error ? res.error : 'Password change failed');
     }
@@ -4528,7 +4550,9 @@ async function renderSerialTracker(fyOverride) {
     <div style="margin-top:1rem;display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-outline" onclick="showSerialFloorModal('${firmsToShow[0]}')" style="font-size:13px">📌 Set gap tracking start # (${firmsToShow[0]})</button>
       ${firmsToShow.length > 1 ? `<button class="btn btn-outline" onclick="showSerialFloorModal('${firmsToShow[1]}')" style="font-size:13px">📌 Set gap tracking start # (${firmsToShow[1]})</button>` : ''}
-      <button class="btn btn-outline" onclick="changeManagementPassword()" style="font-size:13px">🔒 Change management password</button>
+      <button class="btn btn-outline" onclick="changeManagementPassword('MGMT_PASSWORD','Both-firms management')" style="font-size:13px">🔒 Change management password (both firms)</button>
+      <button class="btn btn-outline" onclick="changeManagementPassword('MGMT_F1_PASSWORD','Firm 1 management')" style="font-size:13px">🔒 Set Firm 1 management password</button>
+      <button class="btn btn-outline" onclick="changeManagementPassword('MGMT_F2_PASSWORD','Firm 2 management')" style="font-size:13px">🔒 Set Firm 2 management password</button>
       <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 1')" style="font-size:13px">🔑 Set Firm 1 dispatch password</button>
       <button class="btn btn-outline" onclick="changeDispatchPassword('Firm 2')" style="font-size:13px">🔑 Set Firm 2 dispatch password</button>
       <button class="btn btn-outline" onclick="showDiagnostics()" style="font-size:13px">🔍 Diagnostics</button>
