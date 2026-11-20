@@ -1825,7 +1825,8 @@ async function doLogin() {
       return;
     }
     // S.user.firm controls what data is loaded: 'Both' = all, 'Firm 1'/'Firm 2' = filtered
-    S.user = {name, role:'management', firm: firmView};
+    // loginFirm records which firm the password was for — locks the toggle if not 'Both'
+    S.user = {name, role:'management', firm: firmView, loginFirm: firmView};
   }
 
   // Persist session so page reload / returning from a photo link doesn't log out
@@ -1900,12 +1901,18 @@ function renderPodSearch(query) {
             'style="width:100%;box-sizing:border-box;padding:11px 12px 11px 38px;font-size:15px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);outline:none">' +
         '</div>' +
         '<div id="pod-search-results">' +
-          '<div style="text-align:center;padding:3rem 0.5rem;color:var(--text3)">' +
-            '<div style="font-size:40px;margin-bottom:0.75rem">🔍</div>' +
-            '<div style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:6px">Search all PODs</div>' +
-            '<div style="font-size:12px;line-height:1.8">Customer name &nbsp;·&nbsp; Invoice number<br>Mobile number &nbsp;·&nbsp; Docket / LR no.</div>' +
-            '<div style="margin-top:1.5rem;font-size:11px;color:var(--text3)">Searches all statuses — pending, approved, alerted</div>' +
-          '</div>' +
+          (S.pods && S.pods.length > 0
+            ? '<div style="text-align:center;padding:3rem 0.5rem;color:var(--text3)">' +
+                '<div style="font-size:40px;margin-bottom:0.75rem">🔍</div>' +
+                '<div style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:6px">Search all PODs</div>' +
+                '<div style="font-size:12px;line-height:1.8">Customer name &nbsp;·&nbsp; Invoice number<br>Mobile number &nbsp;·&nbsp; Docket / LR no.</div>' +
+                '<div style="margin-top:0.75rem;font-size:11px;color:var(--text3)">' + (S.pods.length) + ' invoices loaded</div>' +
+              '</div>'
+            : '<div style="text-align:center;padding:2rem 1rem;color:var(--text3)">' +
+                '<div class="spinner" style="margin:0 auto 1rem"></div>' +
+                '<div style="font-size:13px">Loading invoices…</div>' +
+              '</div>'
+          ) +
         '</div>' +
       '</div>';
     // autofocus after render
@@ -2126,6 +2133,8 @@ function updateFirmToggleLabel() {
 
 function cycleFirmView() {
   if (!S.user || S.user.role !== 'management') return;
+  // Only allow cycling if logged in with the both-firms password
+  if (S.user.loginFirm !== 'Both') return;
   const cycle = {'Both':'Firm 1', 'Firm 1':'Firm 2', 'Firm 2':'Both'};
   S.user.firm = cycle[S.user.firm] || 'Both';
   updateFirmToggleLabel();
@@ -2183,9 +2192,10 @@ function enterApp() {
   document.getElementById('topbar-role').textContent = S.user.name + ' ⏏';
   document.getElementById('topbar-role').title = 'Tap to log out';
 
-  // Show firm-view toggle for management only
+  // Show firm-view toggle for management only, and only when logged in as 'Both'
+  // If logged in with a firm-specific password, hide the toggle — they can't switch
   const firmToggle = document.getElementById('topbar-firm-toggle');
-  if (S.user.role === 'management') {
+  if (S.user.role === 'management' && S.user.loginFirm === 'Both') {
     firmToggle.style.display = 'block';
     updateFirmToggleLabel();
   } else {
@@ -2278,7 +2288,14 @@ function showScreen(screen, push=true) {
     case 'unclear-queue':    renderUnclearQueue(); break;
     case 'diagnostics':      showDiagnostics(); break;
     case 'contacts':          renderContacts(); break;
-    case 'pod-search':        renderPodSearch(); break;
+    case 'pod-search':
+      // If pods haven't loaded yet, load them first then open search
+      if (!S.sheetLoaded && hasBackend()) {
+        loadPodsFromSheet().then(() => renderPodSearch());
+      } else {
+        renderPodSearch();
+      }
+      break;
   }
 }
 
