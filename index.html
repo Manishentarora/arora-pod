@@ -4358,12 +4358,31 @@ async function fetchSerialCompleteness(firm, fy) {
   }
 }
 
-async function renderSerialTracker() {
+// Store selected FY for serial tracker so it persists across re-renders
+if (!window._serialFY) window._serialFY = null;
+
+function availableFinancialYears() {
+  // Build a list of FYs from 24-25 up to current+1 so management can browse past years
+  const years = [];
+  const now = new Date();
+  const curFyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  for (let y = 2024; y <= curFyStart + 1; y++) {
+    const label = String(y).slice(2) + '-' + String(y+1).slice(2);
+    years.push(label);
+  }
+  return years.reverse(); // newest first
+}
+
+async function renderSerialTracker(fyOverride) {
   setNavActive('nav-management', 'nav-serials');
   const c = document.getElementById('main-content');
-  c.innerHTML = `<div style="text-align:center;padding:3rem 1rem"><div class="spinner" style="margin:0 auto 1rem"></div><p style="color:var(--text3)">Building invoice register...</p></div>`;
 
-  const fy = currentFinancialYearClient();
+  // Determine FY — use override, or remembered selection, or current
+  const currentFY = currentFinancialYearClient();
+  if (fyOverride) window._serialFY = fyOverride;
+  const fy = window._serialFY || currentFY;
+
+  c.innerHTML = `<div style="text-align:center;padding:3rem 1rem"><div class="spinner" style="margin:0 auto 1rem"></div><p style="color:var(--text3)">Loading FY ${fy}…</p></div>`;
 
   // Dispatch only sees their own firm; management sees based on current view
   const firmsToShow = (S.user.role === 'dispatch')
@@ -4407,17 +4426,17 @@ async function renderSerialTracker() {
             : '<span class="badge badge-ok">✓ No gaps</span>'}
         </div>`;
 
-    // Missing numbers only — compact chips
+    // Missing numbers only — compact chips, page scrolls naturally
     if (missing.length > 0) {
-      const MAX_SHOW = 100;
+      const MAX_SHOW = 200;
       const shown = missing.slice(0, MAX_SHOW);
       const overflow = missing.length - shown.length;
       html += `<div style="margin-top:0.5rem">
-        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:6px">NOT UPLOADED (window: #${res.minSerial||'?'} → #${(res.maxSerial||0)+50})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow-y:auto">
+        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:6px">NOT UPLOADED — ${missing.length} gap(s) in window #${res.minSerial||'?'} → #${(res.maxSerial||0)+100}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
           ${shown.map(s=>`<span class="badge badge-err" style="cursor:pointer" onclick="showMarkExceptionModal('${label}','${fy}',${s})">#${s}</span>`).join('')}
         </div>
-        ${overflow > 0 ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">…and ${overflow} more not shown</div>` : ''}
+        ${overflow > 0 ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">…and ${overflow} more (set a higher start # to reduce this list)</div>` : ''}
         <div style="font-size:11px;color:var(--text3);margin-top:6px">Tap a number to mark as cancelled / explained</div>
       </div>`;
     } else {
@@ -4438,19 +4457,38 @@ async function renderSerialTracker() {
     return;
   }
 
-  let html = results.map((res,i) => firmBlock(firmsToShow[i], res)).join('');
+  // ── FY selector ──────────────────────────────────────────────────────────────
+  const fyOptions = availableFinancialYears();
+  let html = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap">
+      <span style="font-size:13px;font-weight:600;color:var(--text2)">Financial Year:</span>
+      <select id="fy-selector" style="padding:0.4rem 0.75rem;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;background:var(--surface2);color:var(--text);outline:none"
+        onchange="renderSerialTracker(this.value)">
+        ${fyOptions.map(y=>`<option value="${y}"${y===fy?' selected':''}>${y}</option>`).join('')}
+      </select>
+      <button class="btn btn-outline" style="font-size:12px;padding:0.35rem 0.75rem" onclick="renderSerialTracker()">↻ Refresh</button>
+    </div>`;
 
-  // Cancelled/explained entries section
+  html += results.map((res,i) => firmBlock(firmsToShow[i], res)).join('');
+
+  // Cancelled/explained entries — collapsed toggle, not always visible
   results.forEach((res,i) => {
     const ex = (res && res.exceptions)||[];
     if (!ex.length) return;
-    html += `<div class="section-hd">${firmsToShow[i]} — Cancelled / explained</div>`;
-    ex.forEach(e => {
-      html += `<div class="esc-item esc-dispatch">
-        <div class="esc-inv">#${e.serial} — ${escHtml(e.reason)}</div>
-        <div class="esc-detail">${escHtml(e.note||'')} ${e.markedBy?'· by '+escHtml(e.markedBy):''} · ${escHtml(String(e.at||''))}</div>
+    const safeF = firmsToShow[i].replace(/[^a-zA-Z0-9]/g,'_');
+    html += `
+      <div class="card" style="margin-top:0.5rem;padding:0.75rem 1rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="document.getElementById('exc-${safeF}').style.display=document.getElementById('exc-${safeF}').style.display==='none'?'block':'none'">
+          <span style="font-size:13px;font-weight:600;color:var(--text2)">${firmsToShow[i]} — Cancelled / Explained (${ex.length})</span>
+          <span style="font-size:12px;color:var(--text3)">▾ tap to expand</span>
+        </div>
+        <div id="exc-${safeF}" style="display:none;margin-top:0.75rem">
+          ${ex.map(e=>`<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div style="font-size:13px;font-weight:600">#${e.serial} — ${escHtml(e.reason)}</div>
+            <div style="font-size:11px;color:var(--text3)">${escHtml(e.note||'')}${e.markedBy?' · by '+escHtml(e.markedBy):''} · ${escHtml(String(e.at||''))}</div>
+          </div>`).join('')}
+        </div>
       </div>`;
-    });
   });
 
   // ── Invoice search panel ──────────────────────────────────────────────────
@@ -4530,35 +4568,31 @@ function showSerialFloorModal(firm) {
   document.getElementById('edit-modal-title').textContent = 'Set gap tracking start — ' + firm;
   document.getElementById('edit-modal-body').innerHTML = `
     <div style="font-size:13px;color:var(--text2);margin-bottom:1rem">
-      Invoices below this number will be ignored in the missing gaps list.<br>
-      Set this to the first invoice number submitted via this app.
+      Invoice numbers below this value will be ignored in the missing gaps list.<br>
+      Set this to the first invoice number your team submitted via this app.
     </div>
     <div class="field">
-      <label class="field-label">Start tracking from invoice #</label>
-      <input id="serial-floor-input" type="number" min="1" class="field-input" placeholder="e.g. 6100" style="font-size:16px"/>
-    </div>`;
-  document.getElementById('edit-modal-action').onclick = async function() {
-    const floor = document.getElementById('serial-floor-input').value.trim();
-    if (!floor || isNaN(parseInt(floor))) { alert('Please enter a valid invoice number'); return; }
-    const btn = document.getElementById('edit-modal-action');
-    btn.disabled = true; btn.textContent = 'Saving…';
-    try {
-      const res = await postBackend({action:'setSerialFloor', firm, floor:parseInt(floor)});
-      if (res && res.success) {
-        closeModal();
-        renderSerialTracker();
-      } else {
-        alert('Failed: ' + (res && res.error ? res.error : 'Unknown error'));
-        btn.disabled = false; btn.textContent = 'Save';
-      }
-    } catch(e) {
-      alert('Error: ' + e.message);
-      btn.disabled = false; btn.textContent = 'Save';
-    }
-  };
-  document.getElementById('edit-modal-action').textContent = 'Save';
-  document.getElementById('edit-modal-action').disabled = false;
-  openModal();
+      <label class="label">Start tracking from invoice #</label>
+      <input type="number" id="sf-floor" min="1" placeholder="e.g. 6100"
+        style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:16px"/>
+    </div>
+    <div class="btn-group" style="margin-top:0.75rem">
+      <button class="btn btn-outline" onclick="document.getElementById('edit-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="doSetSerialFloor('${firm.replace(/'/g,"\\'")}')">Save →</button>
+    </div>
+    <div style="height:1rem"></div>`;
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+async function doSetSerialFloor(firm) {
+  const val = (document.getElementById('sf-floor').value || '').trim();
+  const floor = parseInt(val);
+  if (!val || isNaN(floor) || floor < 1) { showToast('Enter a valid invoice number'); return; }
+  document.getElementById('edit-modal').classList.remove('open');
+  if (!hasBackend()) { showToast('No backend connected'); return; }
+  const res = await sheetPost({ action:'setSerialFloor', firm, floor });
+  showToast(res && res.success ? 'Saved — reloading…' : 'Could not save: ' + ((res&&res.error)||'unknown'));
+  if (res && res.success) renderSerialTracker();
 }
 
 function showMarkExceptionModal(firm, fy, serial) {
