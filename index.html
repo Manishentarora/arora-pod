@@ -1799,13 +1799,19 @@ async function doLogin() {
   if (!selectedRole) { showToast('Please select a role'); return; }
   if (!name)         { showToast('Please enter your name'); return; }
 
+  // Show verifying state on button
+  const loginBtn = document.querySelector('#login-screen .btn-primary');
+  if (loginBtn) { loginBtn.textContent = 'Verifying…'; loginBtn.disabled = true; }
+  const resetBtn = () => { if (loginBtn) { loginBtn.textContent = 'Enter →'; loginBtn.disabled = false; } };
+
   if (selectedRole === 'dispatch') {
     const firm = document.getElementById('login-dispatch-firm').value;
     const pw   = (document.getElementById('login-dispatch-pw').value || '').trim();
-    if (!firm) { showToast('Please select your firm'); return; }
-    if (!pw)   { showToast('Please enter the dispatch password'); return; }
+    if (!firm) { resetBtn(); showToast('Please select your firm'); return; }
+    if (!pw)   { resetBtn(); showToast('Please enter the dispatch password'); return; }
     const verified = await verifyRolePassword('dispatch', firm, pw);
     if (!verified) {
+      resetBtn();
       showToast('Incorrect dispatch password');
       document.getElementById('login-dispatch-pw').value = '';
       return;
@@ -1815,11 +1821,12 @@ async function doLogin() {
   } else if (selectedRole === 'management') {
     const firmView = document.getElementById('login-mgmt-view').value || 'Both';
     const pw       = (document.getElementById('login-mgmt-pw').value || '').trim();
-    if (!pw) { showToast('Please enter the password'); return; }
+    if (!pw) { resetBtn(); showToast('Please enter the password'); return; }
     // Each firmView has its own password key: Both→null(=mgmt), Firm1→'Firm 1', Firm2→'Firm 2'
     const mgmtFirm = (firmView === 'Firm 1' || firmView === 'Firm 2') ? firmView : null;
     const verified = await verifyRolePassword('management', mgmtFirm, pw);
     if (!verified) {
+      resetBtn();
       showToast('Incorrect password for ' + firmView);
       document.getElementById('login-mgmt-pw').value = '';
       return;
@@ -1829,6 +1836,7 @@ async function doLogin() {
     S.user = {name, role:'management', firm: firmView, loginFirm: firmView};
   }
 
+  resetBtn();
   // Persist session so page reload / returning from a photo link doesn't log out
   try { localStorage.setItem('arora_session_user', JSON.stringify(S.user)); } catch(e) {}
 
@@ -1836,24 +1844,48 @@ async function doLogin() {
   enterApp();
 }
 
-// Cache keys for passwords:
-//   dispatch Firm 1  → arora_pw_hash_dispatch_Firm 1
-//   dispatch Firm 2  → arora_pw_hash_dispatch_Firm 2
-//   management Both  → arora_pw_hash_management_mgmt
-//   management Firm1 → arora_pw_hash_management_Firm 1
-//   management Firm2 → arora_pw_hash_management_Firm 2
+// Verify password against the backend in real-time via GET (response is readable).
+// Falls back to cached hash only if backend is unreachable.
 async function verifyRolePassword(role, firm, pw) {
   const cacheKey = 'arora_pw_hash_' + role + '_' + (firm || 'mgmt');
+
+  // Always try backend first if available
+  if (hasBackend()) {
+    try {
+      const firmParam = firm ? encodeURIComponent(firm) : '';
+      const url = S.backendUrl
+        + '?action=checkPassword'
+        + '&role=' + encodeURIComponent(role)
+        + '&firm=' + firmParam
+        + '&password=' + encodeURIComponent(pw)
+        + '&apiSecret=' + encodeURIComponent(localStorage.getItem('arora_api_secret') || '');
+      const res  = await fetchWithTimeout(url, {method:'GET', redirect:'follow'}, 15000);
+      const text = await res.text();
+      const data = JSON.parse(text);
+      if (data.success && data.match) {
+        // Cache the hash so offline login still works after first successful login
+        localStorage.setItem(cacheKey, simpleHash(pw));
+        return true;
+      }
+      if (data.success && data.match === false) {
+        // Server says wrong password — reject immediately, don't cache
+        return false;
+      }
+      // data.success=false means server error — fall through to cache
+    } catch(e) {
+      console.warn('checkPassword backend error, falling back to cache:', e.message);
+    }
+  }
+
+  // Offline fallback — use cached hash if available
   const cached = localStorage.getItem(cacheKey);
   if (cached) {
     return cached === simpleHash(pw);
   }
-  // First time on this device — store hash and allow entry
-  localStorage.setItem(cacheKey, simpleHash(pw));
-  if (hasBackend()) {
-    sheetPost({action:'verifyPassword', role, firm, password:pw}).catch(()=>{});
-  }
-  return true;
+
+  // No backend and no cache — cannot verify, block entry
+  showToast('Cannot verify password — no connection to server');
+  return false;
 }
 
 // Update password label when firm view changes on login screen
