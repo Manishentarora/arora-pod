@@ -1919,52 +1919,44 @@ function renderPodSearch(query) {
   if (role === 'dispatch') setNavActive('nav-dispatch', 'nav-dsearch');
   else setNavActive('nav-management', 'nav-msearch');
 
+  // Persist query across re-renders
+  if (query !== undefined && query !== null) window._podSearchQuery = query;
+  var initialQuery = window._podSearchQuery || '';
+
   const c = document.getElementById('main-content');
 
-  // First call (no input box yet) — build the shell with input + empty results div
-  if (!document.getElementById('pod-search-input')) {
-    c.innerHTML =
-      '<div style="padding:12px 12px 0">' +
-        '<div style="position:relative;margin-bottom:12px">' +
-          '<svg viewBox="0 0 24 24" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;stroke:var(--text3);fill:none;stroke-width:2;stroke-linecap:round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
-          '<input id="pod-search-input" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" ' +
-            'placeholder="Customer, invoice no., mobile, docket…" ' +
-            'style="width:100%;box-sizing:border-box;padding:11px 12px 11px 38px;font-size:15px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);outline:none">' +
-        '</div>' +
-        '<div id="pod-search-results">' +
-          (S.pods && S.pods.length > 0
-            ? '<div style="text-align:center;padding:3rem 0.5rem;color:var(--text3)">' +
-                '<div style="font-size:40px;margin-bottom:0.75rem">🔍</div>' +
-                '<div style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:6px">Search all PODs</div>' +
-                '<div style="font-size:12px;line-height:1.8">Customer name &nbsp;·&nbsp; Invoice number<br>Mobile number &nbsp;·&nbsp; Docket / LR no.</div>' +
-                '<div style="margin-top:0.75rem;font-size:11px;color:var(--text3)">' + (S.pods.length) + ' invoices loaded</div>' +
-              '</div>'
-            : '<div style="text-align:center;padding:2rem 1rem;color:var(--text3)">' +
-                '<div class="spinner" style="margin:0 auto 1rem"></div>' +
-                '<div style="font-size:13px">Loading invoices…</div>' +
-              '</div>'
-          ) +
-        '</div>' +
-      '</div>';
-    // Wire up input event via addEventListener (avoids inline oninput Android issues)
-    var inp = document.getElementById('pod-search-input');
-    if (inp) {
-      inp.addEventListener('input', function() {
-        var v = this.value;
-        // Debounce: skip if value unchanged (composition/focus events fire with same value)
-        if (inp._lastVal === v) return;
-        inp._lastVal = v;
-        podSearchUpdate(v);
-      });
-      inp.focus();
-    }
-    // If called with an initial query (e.g. from nav re-click), populate it
-    if (query && inp) { inp.value = query; inp._lastVal = query; podSearchUpdate(query); }
-    return;
-  }
+  // Always rebuild the shell fresh — simpler and reliable across all browsers
+  c.innerHTML =
+    '<div style="padding:12px 12px 0">' +
+      '<div style="position:relative;margin-bottom:12px">' +
+        '<svg viewBox="0 0 24 24" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;stroke:var(--text3);fill:none;stroke-width:2;stroke-linecap:round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' +
+        '<input id="pod-search-input" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" ' +
+          'placeholder="Customer, invoice no., mobile, docket…" ' +
+          'style="width:100%;box-sizing:border-box;padding:11px 12px 11px 38px;font-size:15px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);outline:none">' +
+      '</div>' +
+      '<div id="pod-search-results"></div>' +
+    '</div>';
 
-  // Subsequent calls from oninput — just update results, never touch the input
-  podSearchUpdate(query);
+  var inp = document.getElementById('pod-search-input');
+  if (inp) {
+    // Wire input event — no inline oninput to avoid Android IME ghost fires
+    inp.addEventListener('input', function() {
+      window._podSearchQuery = this.value;
+      podSearchUpdate(this.value);
+    });
+    // Restore previous query (or new one passed in)
+    if (initialQuery) {
+      inp.value = initialQuery;
+      podSearchUpdate(initialQuery);
+    } else {
+      // Show empty state
+      podSearchUpdate('');
+    }
+    inp.focus();
+    // Place cursor at end
+    var len = inp.value.length;
+    inp.setSelectionRange(len, len);
+  }
 }
 
 // Updates only the results div — input element is never recreated
@@ -2230,7 +2222,8 @@ async function scanAndShowDuplicates() {
   dupGroups.forEach(function(entry) {
     var invDisplay = entry[0];
     var rows = entry[1];
-    html += '<div style="border:1.5px solid #f59e0b;border-radius:10px;padding:10px 12px;margin-bottom:10px;cursor:pointer;background:var(--surface2)" onclick="document.querySelector(\'[style*=fixed]\').remove();showScreen(\'pod-search\');setTimeout(function(){var inp=document.getElementById(\'pod-search-input\');if(inp){inp.value=\'' + invDisplay.replace(/'/g,"\\'") + '\';inp._lastVal=\'' + invDisplay.replace(/'/g,"\\'") + '\';podSearchUpdate(\'' + invDisplay.replace(/'/g,"\\'") + '\');}},300)">' +
+    var safeInv = invDisplay.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    html += '<div style="border:1.5px solid #f59e0b;border-radius:10px;padding:10px 12px;margin-bottom:10px;cursor:pointer;background:var(--surface2)" onclick="document.querySelector(\'[style*=position:fixed]\').remove();renderPodSearch(\'' + safeInv + '\')">' +
       '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">📄 ' + escHtml(invDisplay) + ' <span style="font-size:11px;font-weight:400;color:var(--accent)">(' + rows.length + ' entries)</span></div>' +
       rows.map(function(p){
         var st = p.status === 'approved' ? '✓ Approved' : p.status === 'incomplete' ? '⚠ Incomplete' : '● Pending';
